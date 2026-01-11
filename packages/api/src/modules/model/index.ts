@@ -148,6 +148,7 @@ export const modelModule = new Elysia({
         .use(adminMiddleware)
         // Create new model
         .post('/', async ({ body }) => {
+          console.log('body', body)
           try {
             const newModel = await createModel(body as Model)
             return {

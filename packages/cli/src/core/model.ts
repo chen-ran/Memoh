@@ -61,6 +61,7 @@ export async function createModel(params: CreateModelParams): Promise<Model> {
     payload.dimensions = params.dimensions
   }
 
+
   const response = await client.model.post(payload)
 
   if (response.error) {

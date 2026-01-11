@@ -63,7 +63,7 @@ export function modelCommands(program: Command) {
     .option('-t, --type <type>', 'Model type (chat/embedding)', 'chat')
     .option('-d, --dimensions <dimensions>', 'Embedding dimensions (required for embedding type)')
     .action(async (options) => {
-      const spinner = ora('Creating model configuration...').start()
+      // const spinner = ora('Creating model configuration...').start()
       try {
         let { name, modelId, baseUrl, apiKey, clientType, type, dimensions } = options
 
@@ -137,7 +137,7 @@ export function modelCommands(program: Command) {
           dimensions = answer.dimensions
         }
 
-        spinner.text = 'Creating model configuration...'
+        // spinner.text = 'Creating model configuration...'
 
         const model = await modelCore.createModel({
           name,
@@ -149,7 +149,7 @@ export function modelCommands(program: Command) {
           dimensions: dimensions ? (typeof dimensions === 'number' ? dimensions : parseInt(dimensions)) : undefined,
         })
 
-        spinner.succeed(chalk.green('Model configuration created successfully'))
+        // spinner.succeed(chalk.green('Model configuration created successfully'))
         console.log(chalk.blue(`Name: ${model.name}`))
         console.log(chalk.blue(`Model ID: ${model.modelId}`))
         console.log(chalk.blue(`Type: ${model.type || 'chat'}`))
@@ -158,7 +158,7 @@ export function modelCommands(program: Command) {
         }
         console.log(chalk.blue(`ID: ${model.id}`))
       } catch (error) {
-        spinner.fail(chalk.red('Operation failed'))
+        // spinner.fail(chalk.red('Operation failed'))
         console.error(chalk.red(formatError(error)))
         process.exit(1)
       }
