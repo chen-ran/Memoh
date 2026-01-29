@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun --minify",
-    "start": "bun run dist/index.js"
+    "start": "pnpm run build && bun run dist/index.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.9",
