@@ -46,7 +46,7 @@ import (
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/fs/{id} [post]
+// @Router /container/fs/{id} [post]
 func (h *ContainerdHandler) HandleMCPFS(c echo.Context) error {
 	containerID := strings.TrimSpace(c.Param("id"))
 	if containerID == "" {

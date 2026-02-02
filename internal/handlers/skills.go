@@ -45,7 +45,7 @@ type skillsOpResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/skills [get]
+// @Router /container/skills [get]
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -103,7 +103,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/skills [post]
+// @Router /container/skills [post]
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -154,7 +154,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/skills [delete]
+// @Router /container/skills [delete]
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {

@@ -97,10 +97,10 @@ func NewContainerdHandler(log *slog.Logger, service ctr.Service, cfg config.MCPC
 }
 
 func (h *ContainerdHandler) Register(e *echo.Echo) {
-	group := e.Group("/mcp")
-	group.POST("/containers", h.CreateContainer)
-	group.GET("/containers", h.ListContainers)
-	group.DELETE("/containers/:id", h.DeleteContainer)
+	group := e.Group("/container")
+	group.POST("", h.CreateContainer)
+	group.GET("/list", h.ListContainers)
+	group.DELETE("/:id", h.DeleteContainer)
 	group.POST("/snapshots", h.CreateSnapshot)
 	group.GET("/snapshots", h.ListSnapshots)
 	group.GET("/skills", h.ListSkills)
@@ -116,7 +116,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Success 200 {object} CreateContainerResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/containers [post]
+// @Router /container [post]
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
@@ -284,7 +284,7 @@ func (h *ContainerdHandler) userContainerID(ctx context.Context, userID string) 
 // @Tags containerd
 // @Success 200 {object} ListContainersResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/containers [get]
+// @Router /container/list [get]
 func (h *ContainerdHandler) ListContainers(c echo.Context) error {
 	ctx := c.Request().Context()
 	containers, err := h.service.ListContainers(ctx)
@@ -325,7 +325,7 @@ func (h *ContainerdHandler) ListContainers(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/containers/{id} [delete]
+// @Router /container/{id} [delete]
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	containerID := strings.TrimSpace(c.Param("id"))
 	if containerID == "" {
@@ -351,7 +351,7 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/snapshots [post]
+// @Router /container/snapshots [post]
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	var req CreateSnapshotRequest
 	if err := c.Bind(&req); err != nil {
@@ -396,7 +396,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /mcp/snapshots [get]
+// @Router /container/snapshots [get]
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	snapshotter := strings.TrimSpace(c.QueryParam("snapshotter"))
 	if snapshotter == "" {
