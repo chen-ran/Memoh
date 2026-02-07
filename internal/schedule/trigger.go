@@ -2,7 +2,7 @@ package schedule
 
 import "context"
 
-// TriggerPayload 描述触发定时任务时传递给聊天侧的参数。
+// TriggerPayload describes the parameters passed to the chat side when a schedule triggers.
 type TriggerPayload struct {
 	ID          string
 	Name        string
@@ -10,6 +10,7 @@ type TriggerPayload struct {
 	Pattern     string
 	MaxCalls    *int
 	Command     string
+	OwnerUserID string
 }
 
 // Triggerer 负责触发与聊天相关的调度执行。

@@ -25,7 +25,7 @@ export const getTools = (
     Object.assign(tools, webTools)
   }
   if (actions.includes(AgentAction.Schedule)) {
-    const scheduleTools = getScheduleTools({ fetch })
+    const scheduleTools = getScheduleTools({ fetch, identity })
     Object.assign(tools, scheduleTools)
   }
   if (actions.includes(AgentAction.Memory)) {

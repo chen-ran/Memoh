@@ -112,7 +112,19 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err != nil {
 		return Bot{}, err
 	}
-	return toBot(row)
+	bot, err := toBot(row)
+	if err != nil {
+		return Bot{}, err
+	}
+	if s.containerLifecycle != nil {
+		if err := s.containerLifecycle.SetupBotContainer(ctx, bot.ID); err != nil {
+			s.logger.Error("failed to setup bot container",
+				slog.String("bot_id", bot.ID),
+				slog.Any("error", err),
+			)
+		}
+	}
+	return bot, nil
 }
 
 func (s *Service) Get(ctx context.Context, botID string) (Bot, error) {

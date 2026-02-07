@@ -135,16 +135,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		desc, _ = p.registry.GetDescriptor(msg.Channel)
 	}
 	resp, err := p.chat.Chat(ctx, chat.ChatRequest{
-		BotID:           identity.BotID,
-		SessionID:       identity.SessionID,
-		Token:           token,
-		UserID:          identity.UserID,
-		ContactID:       identity.ContactID,
-		ContactName:     strings.TrimSpace(identity.Contact.DisplayName),
-		ContactAlias:    strings.TrimSpace(identity.Contact.Alias),
-		ReplyTarget:     strings.TrimSpace(msg.ReplyTarget),
-		SessionToken:    sessionToken,
-		Query:           text,
+		BotID:          identity.BotID,
+		SessionID:      identity.SessionID,
+		Token:          token,
+		UserID:         identity.UserID,
+		ContactID:      identity.ContactID,
+		ContactName:    strings.TrimSpace(identity.Contact.DisplayName),
+		ContactAlias:   strings.TrimSpace(identity.Contact.Alias),
+		ReplyTarget:    strings.TrimSpace(msg.ReplyTarget),
+		SessionToken:   sessionToken,
+		Query:          text,
 		CurrentChannel: msg.Channel.String(),
 		Channels:       []string{msg.Channel.String()},
 	})
@@ -525,7 +525,6 @@ func isMessagingToolDuplicate(text string, sentTexts []string) bool {
 	}
 	return false
 }
-
 
 func (p *ChannelInboundProcessor) requireIdentity(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) (IdentityState, error) {
 	if state, ok := IdentityStateFromContext(ctx); ok {

@@ -20,29 +20,31 @@ type LLMClient struct {
 	http    *http.Client
 }
 
-func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.Duration) *LLMClient {
+func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.Duration) (*LLMClient, error) {
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("llm client: base url is required")
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("llm client: api key is required")
+	}
+	if strings.TrimSpace(model) == "" {
+		return nil, fmt.Errorf("llm client: model is required")
+	}
 	if log == nil {
 		log = slog.Default()
-	}
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
-	if model == "" {
-		model = "gpt-4.1-nano"
 	}
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
 	return &LLMClient{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		model:   model,
 		logger:  log.With(slog.String("client", "llm")),
 		http: &http.Client{
 			Timeout: timeout,
 		},
-	}
+	}, nil
 }
 
 func (c *LLMClient) Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {

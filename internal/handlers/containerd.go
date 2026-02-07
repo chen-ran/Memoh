@@ -641,6 +641,112 @@ func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, actorID, bot
 	return bot, nil
 }
 
+// SetupBotContainer creates and starts the MCP container for a bot.
+func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string) error {
+	containerID := mcp.ContainerPrefix + botID
+
+	image := strings.TrimSpace(h.cfg.BusyboxImage)
+	if image == "" {
+		image = config.DefaultBusyboxImg
+	}
+	snapshotter := strings.TrimSpace(h.cfg.Snapshotter)
+
+	if strings.TrimSpace(h.namespace) != "" {
+		ctx = namespaces.WithNamespace(ctx, h.namespace)
+	}
+
+	dataRoot := strings.TrimSpace(h.cfg.DataRoot)
+	if dataRoot == "" {
+		dataRoot = config.DefaultDataRoot
+	}
+	dataRoot, _ = filepath.Abs(dataRoot)
+	dataMount := strings.TrimSpace(h.cfg.DataMount)
+	if dataMount == "" {
+		dataMount = config.DefaultDataMount
+	}
+	dataDir := filepath.Join(dataRoot, "bots", botID)
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, ".skills"), 0o755); err != nil {
+		return err
+	}
+
+	specOpts := []oci.SpecOpts{
+		oci.WithMounts([]specs.Mount{
+			{
+				Destination: dataMount,
+				Type:        "bind",
+				Source:      dataDir,
+				Options:     []string{"rbind", "rw"},
+			},
+			{
+				Destination: "/app",
+				Type:        "bind",
+				Source:      dataDir,
+				Options:     []string{"rbind", "rw"},
+			},
+		}),
+		oci.WithProcessArgs("/bin/sh", "-lc", "sleep 2147483647"),
+	}
+
+	_, err := h.service.CreateContainer(ctx, ctr.CreateContainerRequest{
+		ID:          containerID,
+		ImageRef:    image,
+		Snapshotter: snapshotter,
+		Labels: map[string]string{
+			mcp.BotLabelKey: botID,
+		},
+		SpecOpts: specOpts,
+	})
+	if err != nil && !errdefs.IsAlreadyExists(err) {
+		return err
+	}
+
+	if h.queries != nil {
+		pgBotID, parseErr := parsePgUUID(botID)
+		if parseErr == nil {
+			ns := strings.TrimSpace(h.namespace)
+			if ns == "" {
+				ns = "default"
+			}
+			_ = h.queries.UpsertContainer(ctx, dbsqlc.UpsertContainerParams{
+				BotID:         pgBotID,
+				ContainerID:   containerID,
+				ContainerName: containerID,
+				Image:         image,
+				Status:        "created",
+				Namespace:     ns,
+				AutoStart:     true,
+				HostPath:      pgtype.Text{String: dataDir, Valid: true},
+				ContainerPath: dataMount,
+			})
+		}
+	}
+
+	fifoDir, err := h.taskFIFODir()
+	if err != nil {
+		return err
+	}
+	if _, err := h.service.StartTask(ctx, containerID, &ctr.StartTaskOptions{
+		UseStdio: false,
+		FIFODir:  fifoDir,
+	}); err == nil {
+		if h.queries != nil {
+			if pgBotID, parseErr := parsePgUUID(botID); parseErr == nil {
+				_ = h.queries.UpdateContainerStarted(ctx, pgBotID)
+			}
+		}
+	} else {
+		h.logger.Error("setup bot container: task start failed",
+			slog.String("bot_id", botID),
+			slog.String("container_id", containerID),
+			slog.Any("error", err),
+		)
+	}
+	return nil
+}
+
 // CleanupBotContainer removes the containerd container and DB record for a bot.
 func (h *ContainerdHandler) CleanupBotContainer(ctx context.Context, botID string) error {
 	containerID, err := h.botContainerID(ctx, botID)

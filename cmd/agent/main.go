@@ -336,5 +336,5 @@ func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
 	if clientType != "openai" && clientType != "openai-compat" {
 		return nil, fmt.Errorf("memory provider client type not supported: %s", memoryProvider.ClientType)
 	}
-	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout), nil
+	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout)
 }

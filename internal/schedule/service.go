@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/robfig/cron/v3"
 
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
@@ -214,6 +216,8 @@ func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 	return s.runSchedule(ctx, schedule)
 }
 
+const scheduleTokenTTL = 10 * time.Minute
+
 func (s *Service) runSchedule(ctx context.Context, schedule Schedule) error {
 	if s.triggerer == nil {
 		return fmt.Errorf("schedule triggerer not configured")
@@ -225,18 +229,55 @@ func (s *Service) runSchedule(ctx context.Context, schedule Schedule) error {
 	if !updated.Enabled {
 		s.removeJob(schedule.ID)
 	}
-	token := ""
-	if err := s.triggerer.TriggerSchedule(ctx, schedule.BotID, TriggerPayload{
+
+	ownerUserID, err := s.resolveBotOwner(ctx, schedule.BotID)
+	if err != nil {
+		return fmt.Errorf("resolve bot owner: %w", err)
+	}
+
+	token, err := s.generateTriggerToken(ownerUserID)
+	if err != nil {
+		return fmt.Errorf("generate trigger token: %w", err)
+	}
+
+	return s.triggerer.TriggerSchedule(ctx, schedule.BotID, TriggerPayload{
 		ID:          schedule.ID,
 		Name:        schedule.Name,
 		Description: schedule.Description,
 		Pattern:     schedule.Pattern,
 		MaxCalls:    schedule.MaxCalls,
 		Command:     schedule.Command,
-	}, token); err != nil {
-		return err
+		OwnerUserID: ownerUserID,
+	}, token)
+}
+
+// resolveBotOwner returns the owner user ID for the given bot.
+func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, error) {
+	pgBotID, err := parseUUID(botID)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	bot, err := s.queries.GetBotByID(ctx, pgBotID)
+	if err != nil {
+		return "", fmt.Errorf("get bot: %w", err)
+	}
+	ownerID := toUUIDString(bot.OwnerUserID)
+	if ownerID == "" {
+		return "", fmt.Errorf("bot owner not found")
+	}
+	return ownerID, nil
+}
+
+// generateTriggerToken creates a short-lived JWT for schedule trigger callbacks.
+func (s *Service) generateTriggerToken(userID string) (string, error) {
+	if strings.TrimSpace(s.jwtSecret) == "" {
+		return "", fmt.Errorf("jwt secret not configured")
+	}
+	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, scheduleTokenTTL)
+	if err != nil {
+		return "", err
+	}
+	return "Bearer " + signed, nil
 }
 
 func (s *Service) scheduleJob(schedule sqlc.Schedule) error {

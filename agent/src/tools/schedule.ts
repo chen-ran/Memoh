@@ -1,9 +1,11 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { AuthFetcher } from '..'
+import type { IdentityContext } from '../types'
 
 export type ScheduleToolParams = {
   fetch: AuthFetcher
+  identity: IdentityContext
 }
 
 const ScheduleSchema = z.object({
@@ -15,12 +17,15 @@ const ScheduleSchema = z.object({
   command: z.string(),
 })
 
-export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
+export const getScheduleTools = ({ fetch, identity }: ScheduleToolParams) => {
+  const botId = identity.botId.trim()
+  const base = `/bots/${botId}/schedule`
+
   const listSchedules = tool({
     description: 'List schedules for current user',
     inputSchema: z.object({}),
     execute: async () => {
-      const response = await fetch('/schedule', { method: 'GET' })
+      const response = await fetch(base, { method: 'GET' })
       return response.json()
     },
   })
@@ -31,7 +36,7 @@ export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
       id: z.string().describe('Schedule ID'),
     }),
     execute: async ({ id }) => {
-      const response = await fetch(`/schedule/${id}`, { method: 'GET' })
+      const response = await fetch(`${base}/${id}`, { method: 'GET' })
       return response.json()
     },
   })
@@ -47,7 +52,7 @@ export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
       command: z.string(),
     }),
     execute: async (payload) => {
-      const response = await fetch('/schedule', {
+      const response = await fetch(base, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -63,7 +68,7 @@ export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
     }),
     execute: async (payload) => {
       const { id, ...body } = payload
-      const response = await fetch(`/schedule/${id}`, {
+      const response = await fetch(`${base}/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -78,7 +83,7 @@ export const getScheduleTools = ({ fetch }: ScheduleToolParams) => {
       id: z.string(),
     }),
     execute: async ({ id }) => {
-      const response = await fetch(`/schedule/${id}`, { method: 'DELETE' })
+      const response = await fetch(`${base}/${id}`, { method: 'DELETE' })
       return response.status === 204 ? { success: true } : response.json()
     },
   })

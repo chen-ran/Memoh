@@ -130,10 +130,10 @@ func (r *Resolver) Embed(ctx context.Context, req Request) (Result, error) {
 		if req.Provider != ProviderOpenAI {
 			return Result{}, errors.New("provider not implemented")
 		}
-		if strings.TrimSpace(provider.ApiKey) == "" {
-			return Result{}, errors.New("openai api key is required")
+		embedder, err := NewOpenAIEmbedder(r.logger, provider.ApiKey, provider.BaseUrl, req.Model, req.Dimensions, timeout)
+		if err != nil {
+			return Result{}, err
 		}
-		embedder := NewOpenAIEmbedder(r.logger, provider.ApiKey, provider.BaseUrl, req.Model, req.Dimensions, timeout)
 		vector, err := embedder.Embed(ctx, req.Input.Text)
 		if err != nil {
 			return Result{}, err

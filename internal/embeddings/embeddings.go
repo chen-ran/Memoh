@@ -37,15 +37,18 @@ type openAIEmbeddingResponse struct {
 	} `json:"data"`
 }
 
-func NewOpenAIEmbedder(log *slog.Logger, apiKey, baseURL, model string, dims int, timeout time.Duration) *OpenAIEmbedder {
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
+func NewOpenAIEmbedder(log *slog.Logger, apiKey, baseURL, model string, dims int, timeout time.Duration) (*OpenAIEmbedder, error) {
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("openai embedder: base url is required")
 	}
-	if model == "" {
-		model = "text-embedding-3-small"
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("openai embedder: api key is required")
+	}
+	if strings.TrimSpace(model) == "" {
+		return nil, fmt.Errorf("openai embedder: model is required")
 	}
 	if dims <= 0 {
-		dims = 1536
+		return nil, fmt.Errorf("openai embedder: dimensions must be positive")
 	}
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -59,7 +62,7 @@ func NewOpenAIEmbedder(log *slog.Logger, apiKey, baseURL, model string, dims int
 		http: &http.Client{
 			Timeout: timeout,
 		},
-	}
+	}, nil
 }
 
 func (e *OpenAIEmbedder) Dimensions() int {
