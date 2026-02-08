@@ -364,8 +364,27 @@ export const streamChat = async (query: string, botId: string, sessionId: string
         }
 
         case 'reasoning_start':
+          if (printedText) {
+            process.stdout.write('\n')
+            printedText = false
+          }
+          process.stdout.write(chalk.dim('  💭 '))
+          break
+
         case 'reasoning_delta':
+          if (typeof event.delta === 'string') {
+            process.stdout.write(chalk.dim(event.delta))
+            printedText = true
+          }
+          break
+
         case 'reasoning_end':
+          if (printedText) {
+            process.stdout.write('\n')
+            printedText = false
+          }
+          break
+
         case 'agent_start':
         case 'agent_end':
           break
