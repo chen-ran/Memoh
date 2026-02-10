@@ -24,6 +24,7 @@ import {
   faCheck,
   faEye,
   faEyeSlash,
+  faChevronRight,
 } from '@fortawesome/free-solid-svg-icons'
 import {
   faRectangleList,
@@ -43,6 +44,7 @@ library.add(
   faCheck,
   faEye,
   faEyeSlash,
+  faChevronRight,
   faRectangleList,
   faTrashCan,
   faComments,

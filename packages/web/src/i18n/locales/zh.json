@@ -50,8 +50,15 @@
   },
   "chat": {
     "greeting": "你好！有什么我可以帮你的吗？",
-    "inputPlaceholder": "输入你的问题…",
-    "send": "发送"
+    "inputPlaceholder": "输入你的问题… (Enter 发送)",
+    "send": "发送",
+    "selectBot": "选择一个 Bot 开始对话",
+    "selectBotHint": "从左侧列表中选择",
+    "thinking": "正在思考…",
+    "thinkingInProgress": "正在思考…",
+    "thinkingDone": "思考过程",
+    "toolRunning": "执行中",
+    "toolDone": "已完成"
   },
   "models": {
     "title": "模型",

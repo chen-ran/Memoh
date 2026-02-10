@@ -1,103 +1,103 @@
-import { fetchApi } from '@/utils/request'
-
 // ---- Types ----
 
-export interface Bot {
-  id: string
-  name?: string
+export interface StreamEvent {
+  type?:
+    | 'text_start' | 'text_delta' | 'text_end'
+    | 'reasoning_start' | 'reasoning_delta' | 'reasoning_end'
+    | 'tool_call_start' | 'tool_call_end'
+    | 'agent_start' | 'agent_end'
+  delta?: string
+  toolName?: string
+  input?: unknown
+  result?: unknown
+  [key: string]: unknown
 }
 
-export interface BotsResponse {
-  items: Bot[]
-}
+export type StreamEventHandler = (event: StreamEvent) => void
 
-export interface CreateSessionResponse {
-  session_id: string
-}
-
-// ---- Plain async functions (used by chat store) ----
-
-export async function fetchBots(): Promise<Bot[]> {
-  const res = await fetchApi<BotsResponse>('/bots')
-  return res.items
-}
+// ---- Session ----
 
 export async function createSession(botId: string): Promise<string> {
-  const res = await fetchApi<CreateSessionResponse>(
-    `/bots/${botId}/web/sessions`,
-    { method: 'POST' },
-  )
-  return res.session_id
-}
-
-export async function sendChatMessage(
-  botId: string,
-  sessionId: string,
-  text: string,
-): Promise<void> {
-  await fetchApi(`/bots/${botId}/web/sessions/${sessionId}/messages`, {
+  const token = localStorage.getItem('token') ?? ''
+  const resp = await fetch(`/api/bots/${botId}/web/sessions`, {
     method: 'POST',
-    body: { text },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
   })
+  if (!resp.ok) throw new Error(`Failed to create session: ${resp.status}`)
+  const data = await resp.json()
+  return data.session_id
 }
 
-/**
- * 创建 SSE 流连接。返回 abort 函数。
- * 调用方负责处理 reader 中的数据。
- */
-export function createStreamConnection(
+// ---- Streaming chat ----
+
+export function streamChat(
   botId: string,
   sessionId: string,
-  onMessage: (text: string) => void,
+  query: string,
+  onEvent: StreamEventHandler,
+  onDone: () => void,
+  onError: (err: Error) => void,
 ): () => void {
   const controller = new AbortController()
   const token = localStorage.getItem('token') ?? ''
 
   ;(async () => {
-    const resp = await fetch(`/api/bots/${botId}/web/sessions/${sessionId}/stream`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    }).catch(() => null)
+    try {
+      const resp = await fetch(
+        `/api/bots/${botId}/chat/stream?session_id=${encodeURIComponent(sessionId)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ query }),
+          signal: controller.signal,
+        },
+      )
 
-    if (!resp?.ok || !resp.body) return
+      if (!resp.ok || !resp.body) {
+        onError(new Error(`Chat request failed: ${resp.status}`))
+        return
+      }
 
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
 
-      let idx: number
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, idx).trim()
-        buffer = buffer.slice(idx + 1)
-        if (!line.startsWith('data:')) continue
-        const payload = line.slice(5).trim()
-        if (!payload || payload === '[DONE]') continue
+        let idx: number
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, idx).trim()
+          buffer = buffer.slice(idx + 1)
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
 
-        const text = extractTextFromEvent(payload)
-        if (text) onMessage(text)
+          try {
+            const event = JSON.parse(payload) as StreamEvent
+            onEvent(event)
+          } catch {
+            // 非 JSON payload，尝试作为纯文本
+            onEvent({ type: 'text_delta', delta: payload })
+          }
+        }
+      }
+
+      onDone()
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        onError(err as Error)
       }
     }
   })()
 
   return () => controller.abort()
-}
-
-function extractTextFromEvent(payload: string): string | null {
-  try {
-    const event = JSON.parse(payload)
-    if (typeof event === 'string') return event
-    if (typeof event?.text === 'string') return event.text
-    if (typeof event?.content === 'string') return event.content
-    if (typeof event?.data === 'string') return event.data
-    if (typeof event?.data?.text === 'string') return event.data.text
-    return null
-  } catch {
-    return payload
-  }
 }

@@ -50,8 +50,15 @@
   },
   "chat": {
     "greeting": "Hi! How can I help you today?",
-    "inputPlaceholder": "Type your question…",
-    "send": "Send"
+    "inputPlaceholder": "Type your question… (Enter to send)",
+    "send": "Send",
+    "selectBot": "Select a Bot to start chatting",
+    "selectBotHint": "Choose from the list on the left",
+    "thinking": "Thinking…",
+    "thinkingInProgress": "Thinking…",
+    "thinkingDone": "Thought process",
+    "toolRunning": "Running",
+    "toolDone": "Done"
   },
   "models": {
     "title": "Models",
