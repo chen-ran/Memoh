@@ -27,19 +27,63 @@ export default defineConfig({
     sidebar: {
       '/': [
         {
-          text: 'Hello Memoh',
+          text: 'Overview',
           link: '/index.md'
         },
         {
           text: 'Getting Started',
           link: '/getting-started.md'
+        },
+        {
+          text: 'Core Concepts',
+          items: [
+            {
+              text: 'Concepts Overview',
+              link: '/concepts/index.md'
+            },
+            {
+              text: 'Accounts and Linking',
+              link: '/concepts/identity-and-binding.md'
+            }
+          ]
+        },
+        {
+          text: 'Documentation Style Guide',
+          items: [
+            {
+              text: 'Terminology Rules',
+              link: '/style/terminology.md'
+            }
+          ]
         }
       ],
       '/zh/': [
         {
-          text: 'Hello Memoh',
+          text: '文档总览',
           link: '/zh/index.md'
         },
+        {
+          text: '核心概念',
+          items: [
+            {
+              text: '概念总览',
+              link: '/zh/concepts/index.md'
+            },
+            {
+              text: '账号模型与绑定',
+              link: '/zh/concepts/identity-and-binding.md'
+            }
+          ]
+        },
+        {
+          text: '文档写作规范',
+          items: [
+            {
+              text: '术语规范',
+              link: '/zh/style/terminology.md'
+            }
+          ]
+        }
       ]
     },
 
