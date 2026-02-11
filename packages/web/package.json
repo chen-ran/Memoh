@@ -9,7 +9,6 @@
     "start": "vite preview"
   },
   "dependencies": {
-    "@memoh/shared": "workspace:*",
     "@memoh/ui": "workspace:*",
     "@memoh/sdk": "workspace:*",
     "@pinia/colada": "^0.21.1",

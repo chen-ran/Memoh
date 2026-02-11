@@ -89,7 +89,7 @@
                     <SelectContent>
                       <SelectGroup>
                         <SelectItem
-                          v-for="type in clientType"
+                          v-for="type in CLIENT_TYPES"
                           :key="type"
                           :value="type"
                         >
@@ -152,7 +152,7 @@ import {
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { clientType } from '@memoh/shared'
+import { CLIENT_TYPES } from '@/composables/api/useProviders'
 import { useCreateProvider } from '@/composables/api/useProviders'
 
 const open = defineModel<boolean>('open')

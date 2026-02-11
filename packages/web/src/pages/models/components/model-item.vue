@@ -43,7 +43,7 @@ import {
   Button,
 } from '@memoh/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import { type ModelInfo } from '@memoh/shared'
+import { type ModelInfo } from '@/composables/api/useModels'
 
 defineProps<{
   model: ModelInfo

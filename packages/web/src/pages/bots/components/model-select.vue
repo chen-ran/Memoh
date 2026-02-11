@@ -89,7 +89,7 @@ import {
   ScrollArea,
 } from '@memoh/ui'
 import { computed, ref, watch } from 'vue'
-import type { ModelInfo } from '@memoh/shared'
+import type { ModelInfo } from '@/composables/api/useModels'
 import type { ProviderWithId } from '@/composables/api/useProviders'
 
 const props = defineProps<{

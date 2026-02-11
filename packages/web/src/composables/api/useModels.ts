@@ -1,9 +1,19 @@
 import { fetchApi } from '@/utils/request'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { type ModelInfo } from '@memoh/shared'
 import type { Ref } from 'vue'
 
 // ---- Types ----
+
+export interface ModelInfo {
+  dimensions: number
+  is_multimodal: boolean
+  input?: string[]
+  llm_provider_id: string
+  model_id: string
+  name: string
+  type: string
+  enable_as?: string
+}
 
 export interface CreateModelRequest {
   model_id: string

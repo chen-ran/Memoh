@@ -16,5 +16,5 @@ export default defineConfig({
     },
     '@hey-api/client-fetch',
     '@pinia/colada',
-  ]
-});
+  ],
+})

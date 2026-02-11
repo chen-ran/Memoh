@@ -172,7 +172,7 @@ import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
-import { type ModelInfo } from '@memoh/shared'
+import { type ModelInfo } from '@/composables/api/useModels'
 import { useCreateModel, useUpdateModel } from '@/composables/api/useModels'
 
 const formSchema = toTypedSchema(z.object({

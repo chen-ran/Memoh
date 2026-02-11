@@ -1,8 +1,23 @@
 import { fetchApi } from '@/utils/request'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { type MCPListItem } from '@memoh/shared'
-
 // ---- Types ----
+
+export interface MCPListItem {
+  id: string
+  type: string
+  name: string
+  config: {
+    cwd: string
+    env: Record<string, string>
+    args: string[]
+    type: string
+    command: string
+  }
+  active: boolean
+  user: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface McpListResponse {
   items: MCPListItem[]

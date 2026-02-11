@@ -100,7 +100,7 @@ import { computed, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { type ProviderInfo } from '@memoh/shared'
+import { type ProviderInfo } from '@/composables/api/useProviders'
 
 const props = defineProps<{
   provider: Partial<ProviderInfo & { id: string }> | undefined

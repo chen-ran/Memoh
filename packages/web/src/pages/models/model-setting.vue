@@ -32,7 +32,8 @@ import { Separator } from '@memoh/ui'
 import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
 import { computed, inject, provide, reactive, ref, toRef, watch } from 'vue'
-import { type ProviderInfo, type ModelInfo } from '@memoh/shared'
+import { type ModelInfo } from '@/composables/api/useModels'
+import { type ProviderInfo } from '@/composables/api/useProviders'
 import {
   useUpdateProvider,
   useDeleteProvider,

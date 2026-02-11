@@ -28,9 +28,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@memoh/ui'
-import { type ProviderInfo } from '@memoh/shared'
+import { type ProviderInfo, CLIENT_TYPES } from '@/composables/api/useProviders'
 import AddProvider from '@/components/add-provider/index.vue'
-import { clientType } from '@memoh/shared'
 import { useProviderList } from '@/composables/api/useProviders'
 
 const filterProvider = ref('')
@@ -141,7 +140,7 @@ const openStatus = reactive({
               <SelectContent>
                 <SelectGroup>
                   <SelectItem
-                    v-for="type in clientType"
+                    v-for="type in CLIENT_TYPES"
                     :key="type"
                     :value="type"
                   >

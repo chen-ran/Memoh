@@ -51,7 +51,7 @@ import {
 } from '@memoh/ui'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from './model-item.vue'
-import { type ModelInfo } from '@memoh/shared'
+import { type ModelInfo } from '@/composables/api/useModels'
 
 defineProps<{
   providerId: string | undefined

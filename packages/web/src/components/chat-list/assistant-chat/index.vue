@@ -4,14 +4,11 @@
       <FontAwesomeIcon :icon="['fas', 'robot']" />
     </div>
     <section class="w-[90%]">
-      <sup class="font-semibold">
-        {{ robotSay.type }}
-      </sup>
       <p class="leading-7 text-muted-foreground break-all">
-        <LoadingDots v-if="robotSay.state === 'thinking'" />
+        <LoadingDots v-if="message.streaming && !textContent" />
         <MarkdownRender
           v-else
-          :content="robotSay.description"
+          :content="textContent"
           custom-id="chat-answer"
         />
       </p>
@@ -20,14 +17,22 @@
 </template>
 
 <script setup lang="ts">
-import type { robot } from '@memoh/shared'
+import { computed } from 'vue'
+import type { ChatMessage } from '@/store/chat-list'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import LoadingDots from '@/components/loading-dots/index.vue'
 
 enableKatex()
 enableMermaid()
 
-defineProps<{
-  robotSay: robot
+const props = defineProps<{
+  message: ChatMessage
 }>()
+
+const textContent = computed(() => {
+  return props.message.blocks
+    .filter(b => b.type === 'text')
+    .map(b => b.type === 'text' ? b.content : '')
+    .join('')
+})
 </script>

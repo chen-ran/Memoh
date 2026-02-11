@@ -1,9 +1,18 @@
 import { fetchApi } from '@/utils/request'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { type ProviderInfo } from '@memoh/shared'
 import type { Ref } from 'vue'
 
 // ---- Types ----
+
+export interface ProviderInfo {
+  api_key: string
+  base_url: string
+  client_type: string
+  metadata: Record<'additionalProp1', object>
+  name: string
+}
+
+export const CLIENT_TYPES = ['openai', 'anthropic', 'google', 'ollama'] as const
 
 export type ProviderWithId = ProviderInfo & { id: string }
 
