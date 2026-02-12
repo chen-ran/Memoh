@@ -120,10 +120,6 @@ Before finalizing, verify the value is one of the allowed codes.`
 	return systemPrompt, userPrompt
 }
 
-func parseMessages(messages []string) string {
-	return strings.Join(messages, "\n")
-}
-
 func removeCodeBlocks(text string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(text, "```json", ""), "```", "")
 }

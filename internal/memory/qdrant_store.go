@@ -55,7 +55,7 @@ func NewQdrantStore(log *slog.Logger, baseURL, apiKey, collection string, dimens
 		collection = "memory"
 	}
 	if dimension <= 0 && strings.TrimSpace(sparseVectorName) == "" {
-		dimension = 1536
+		return nil, fmt.Errorf("embedding dimension is required")
 	}
 
 	cfg := &qdrant.Config{
@@ -455,22 +455,19 @@ func (s *QdrantStore) refreshCollectionSchema(ctx context.Context, vectors map[s
 				s.vectorNames[name] = int(vec.GetSize())
 			}
 		}
-		if len(vectors) == 0 {
-			goto sparseCheck
-		}
-		for name, dim := range vectors {
-			if existing, ok := s.vectorNames[name]; ok && existing == dim {
-				continue
+		if len(vectors) > 0 {
+			for name, dim := range vectors {
+				if existing, ok := s.vectorNames[name]; ok && existing == dim {
+					continue
+				}
+				return fmt.Errorf("collection missing vector %s (dim %d); migration required", name, dim)
 			}
-			return fmt.Errorf("collection missing vector %s (dim %d); migration required", name, dim)
 		}
-	}
-	if vectorsConfig == nil || vectorsConfig.GetParamsMap() == nil {
+	} else {
 		s.usesNamedVectors = false
 		s.vectorNames = nil
 	}
 
-sparseCheck:
 	sparseConfig := params.GetSparseVectorsConfig()
 	if s.sparseVectorName != "" {
 		needsUpdate := false
@@ -506,7 +503,7 @@ func (s *QdrantStore) ensurePayloadIndexes(ctx context.Context) error {
 	if s.client == nil {
 		return nil
 	}
-	fields := []string{"botId", "runId"}
+	fields := []string{"bot_id", "run_id"}
 	wait := true
 	for _, field := range fields {
 		_, err := s.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{

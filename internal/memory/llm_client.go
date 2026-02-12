@@ -51,7 +51,7 @@ func (c *LLMClient) Extract(ctx context.Context, req ExtractRequest) (ExtractRes
 	if len(req.Messages) == 0 {
 		return ExtractResponse{}, fmt.Errorf("messages is required")
 	}
-	parsedMessages := parseMessages(formatMessages(req.Messages))
+	parsedMessages := strings.Join(formatMessages(req.Messages), "\n")
 	systemPrompt, userPrompt := getFactRetrievalMessages(parsedMessages)
 	content, err := c.callChat(ctx, []chatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -122,7 +122,7 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 
 		actions = append(actions, DecisionAction{
 			Event:     event,
-			ID:        normalizeID(item["id"]),
+			ID:        asString(item["id"]),
 			Text:      text,
 			OldMemory: asString(item["old_memory"]),
 		})
@@ -240,14 +240,6 @@ func asString(value any) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeID(value any) string {
-	id := asString(value)
-	if id == "" {
-		return ""
-	}
-	return id
 }
 
 func normalizeMemoryItems(value any) []map[string]any {
