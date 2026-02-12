@@ -35,6 +35,8 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/mcp")
 	group.GET("", h.List)
 	group.POST("", h.Create)
+	group.PUT("/import", h.Import)
+	group.GET("/export", h.Export)
 	group.GET("/:id", h.Get)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
@@ -213,6 +215,67 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Import godoc
+// @Summary Import MCP connections
+// @Description Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.
+// @Tags mcp
+// @Param payload body mcp.ImportRequest true "mcpServers dict"
+// @Success 200 {object} mcp.ListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp/import [put]
+func (h *MCPHandler) Import(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	var req mcp.ImportRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	items, err := h.service.Import(c.Request().Context(), botID, req)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
+}
+
+// Export godoc
+// @Summary Export MCP connections
+// @Description Export all MCP connections for a bot in standard mcpServers format.
+// @Tags mcp
+// @Success 200 {object} mcp.ExportResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp/export [get]
+func (h *MCPHandler) Export(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	resp, err := h.service.ExportByBot(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 func (h *MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
