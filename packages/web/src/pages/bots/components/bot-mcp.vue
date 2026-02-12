@@ -20,7 +20,7 @@
             v-if="loading"
             class="mr-1.5"
           />
-          {{ $t('bots.container.actions.refresh') }}
+          {{ $t('common.refresh') }}
         </Button>
         <Button
           variant="outline"
@@ -30,19 +30,47 @@
           {{ $t('common.export') }}
         </Button>
         <Button
-          variant="outline"
-          size="sm"
-          @click="importDialogOpen = true"
-        >
-          {{ $t('common.import') }}
-        </Button>
-        <Button
           size="sm"
           @click="openCreateDialog"
         >
           {{ $t('common.add') }}
         </Button>
       </div>
+    </div>
+
+    <!-- Batch bar -->
+    <div
+      v-if="selectedIds.length > 0"
+      class="flex items-center gap-3 rounded-md border bg-muted/50 px-3 py-2"
+    >
+      <span class="text-sm text-muted-foreground">
+        {{ $t('common.batchSelected', { count: selectedIds.length }) }}
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        @click="handleBatchExport"
+      >
+        {{ $t('common.batchExport') }}
+      </Button>
+      <ConfirmPopover
+        :message="$t('common.batchDeleteConfirm', { count: selectedIds.length })"
+        @confirm="handleBatchDelete"
+      >
+        <Button
+          variant="destructive"
+          size="sm"
+        >
+          {{ $t('common.batchDelete') }}
+        </Button>
+      </ConfirmPopover>
+      <Button
+        variant="ghost"
+        size="sm"
+        @click="clearSelection"
+      >
+        {{ $t('common.cancelSelection') }}
+      </Button>
     </div>
 
     <!-- Loading -->
@@ -71,212 +99,242 @@
       :data="items"
     />
 
-    <!-- Create/Edit dialog -->
+    <!-- Add/Edit dialog: Single form + Import tab with bidirectional sync -->
     <Dialog v-model:open="formDialogOpen">
       <DialogContent class="sm:max-w-lg">
-        <form @submit.prevent="handleSubmit">
-          <DialogHeader>
-            <DialogTitle>{{ editingItem ? $t('common.edit') : $t('common.add') }} MCP Server</DialogTitle>
-          </DialogHeader>
-
-          <div class="mt-4 flex flex-col gap-3">
-            <div class="space-y-1.5">
-              <Label>{{ $t('mcp.name') }}</Label>
-              <Input
-                v-model="formData.name"
-                :placeholder="$t('mcp.namePlaceholder')"
-              />
-            </div>
-
-            <div class="space-y-1.5">
-              <Label>{{ $t('mcp.command') }} <span class="text-muted-foreground text-xs">({{ $t('common.optional') }})</span></Label>
-              <Input
-                v-model="formData.command"
-                :placeholder="$t('mcp.commandPlaceholder')"
-                :disabled="!!formData.url"
-              />
-            </div>
-
-            <div class="space-y-1.5">
-              <Label>URL <span class="text-muted-foreground text-xs">({{ $t('common.optional') }})</span></Label>
-              <Input
-                v-model="formData.url"
-                placeholder="https://example.com/mcp"
-                :disabled="!!formData.command"
-              />
-            </div>
-
-            <div
-              v-if="formData.command"
-              class="space-y-1.5"
-            >
-              <Label>{{ $t('mcp.arguments') }}</Label>
-              <TagsInput
-                v-model="argsTags"
-                :add-on-blur="true"
-                :duplicate="true"
-              >
-                <TagsInputItem
-                  v-for="item in argsTags"
-                  :key="item"
-                  :value="item"
-                >
-                  <TagsInputItemText />
-                  <TagsInputItemDelete />
-                </TagsInputItem>
-                <TagsInputInput
-                  :placeholder="$t('mcp.argumentsPlaceholder')"
-                  class="w-full py-1"
-                />
-              </TagsInput>
-            </div>
-
-            <div
-              v-if="formData.command"
-              class="space-y-1.5"
-            >
-              <Label>{{ $t('mcp.env') }}</Label>
-              <TagsInput
-                :model-value="envTags.tagList.value"
-                :add-on-blur="true"
-                :convert-value="envTags.convertValue"
-                @update:model-value="(tags) => envTags.handleUpdate(tags.map(String))"
-              >
-                <TagsInputItem
-                  v-for="(value, index) in envTags.tagList.value"
-                  :key="index"
-                  :value="value"
-                >
-                  <TagsInputItemText />
-                  <TagsInputItemDelete />
-                </TagsInputItem>
-                <TagsInputInput
-                  :placeholder="$t('mcp.envPlaceholder')"
-                  class="w-full py-1"
-                />
-              </TagsInput>
-            </div>
-
-            <div
-              v-if="formData.command"
-              class="space-y-1.5"
-            >
-              <Label>{{ $t('mcp.cwd') }}</Label>
-              <Input
-                v-model="formData.cwd"
-                :placeholder="$t('mcp.cwdPlaceholder')"
-              />
-            </div>
-
-            <div
-              v-if="formData.url"
-              class="space-y-1.5"
-            >
-              <Label>Headers</Label>
-              <TagsInput
-                :model-value="headerTags.tagList.value"
-                :add-on-blur="true"
-                :convert-value="headerTags.convertValue"
-                @update:model-value="(tags) => headerTags.handleUpdate(tags.map(String))"
-              >
-                <TagsInputItem
-                  v-for="(value, index) in headerTags.tagList.value"
-                  :key="index"
-                  :value="value"
-                >
-                  <TagsInputItemText />
-                  <TagsInputItemDelete />
-                </TagsInputItem>
-                <TagsInputInput
-                  placeholder="Key:Value"
-                  class="w-full py-1"
-                />
-              </TagsInput>
-            </div>
-
-            <div
-              v-if="formData.url && !formData.command"
-              class="space-y-1.5"
-            >
-              <Label>Transport</Label>
-              <Select v-model="formData.transport">
-                <SelectTrigger class="w-full">
-                  <SelectValue placeholder="http" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="http">
-                      HTTP (Streamable)
-                    </SelectItem>
-                    <SelectItem value="sse">
-                      SSE
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <Label>{{ $t('mcp.active') }}</Label>
-              <Switch v-model:checked="formData.active" />
-            </div>
-          </div>
-
-          <DialogFooter class="mt-6">
-            <DialogClose as-child>
-              <Button variant="outline">
-                {{ $t('common.cancel') }}
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              :disabled="submitting || !formData.name.trim() || (!formData.command.trim() && !formData.url.trim())"
-            >
-              <Spinner
-                v-if="submitting"
-                class="mr-1.5"
-              />
-              {{ $t('common.confirm') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-
-    <!-- Import dialog -->
-    <Dialog v-model:open="importDialogOpen">
-      <DialogContent class="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{{ $t('common.import') }} mcpServers</DialogTitle>
+          <DialogTitle>{{ editingItem ? $t('common.edit') : $t('common.add') }} MCP Server</DialogTitle>
         </DialogHeader>
-        <div class="mt-4 space-y-3">
-          <p class="text-sm text-muted-foreground">
-            {{ $t('mcp.importHint') }}
-          </p>
-          <Textarea
-            v-model="importJson"
-            rows="10"
-            class="font-mono text-xs"
-            placeholder='{ "mcpServers": { "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"] } } }'
-          />
-        </div>
-        <DialogFooter class="mt-4">
-          <DialogClose as-child>
-            <Button variant="outline">
-              {{ $t('common.cancel') }}
-            </Button>
-          </DialogClose>
-          <Button
-            :disabled="importSubmitting || !importJson.trim()"
-            @click="handleImport"
+
+        <Tabs
+          v-model="addDialogTab"
+          class="mt-4 w-full"
+        >
+          <TabsList class="w-full">
+            <TabsTrigger
+              value="single"
+              :disabled="!!editingItem"
+            >
+              {{ $t('common.tabAddSingle') }}
+            </TabsTrigger>
+            <TabsTrigger
+              value="import"
+              :disabled="!!editingItem"
+            >
+              {{ $t('common.tabImportJson') }}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent
+            value="single"
+            class="mt-3"
           >
-            <Spinner
-              v-if="importSubmitting"
-              class="mr-1.5"
+            <form
+              class="flex flex-col gap-3"
+              @submit.prevent="handleSubmit"
+            >
+              <div class="space-y-1.5">
+                <Label>{{ $t('common.name') }}</Label>
+                <Input
+                  v-model="formData.name"
+                  :placeholder="$t('common.namePlaceholder')"
+                />
+              </div>
+
+              <Tabs
+                v-model="connectionMode"
+                class="w-full"
+              >
+                <TabsList class="w-full">
+                  <TabsTrigger value="stdio">
+                    {{ $t('mcp.types.stdio') }}
+                  </TabsTrigger>
+                  <TabsTrigger value="remote">
+                    {{ $t('mcp.types.remote') }}
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent
+                  value="stdio"
+                  class="mt-3 flex flex-col gap-3"
+                >
+                  <div class="space-y-1.5">
+                    <Label>{{ $t('mcp.command') }}</Label>
+                    <Input
+                      v-model="formData.command"
+                      :placeholder="$t('mcp.commandPlaceholder')"
+                    />
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <Label>{{ $t('mcp.arguments') }}</Label>
+                    <TagsInput
+                      v-model="argsTags"
+                      :add-on-blur="true"
+                      :duplicate="true"
+                    >
+                      <TagsInputItem
+                        v-for="item in argsTags"
+                        :key="item"
+                        :value="item"
+                      >
+                        <TagsInputItemText />
+                        <TagsInputItemDelete />
+                      </TagsInputItem>
+                      <TagsInputInput
+                        :placeholder="$t('mcp.argumentsPlaceholder')"
+                        class="w-full py-1"
+                      />
+                    </TagsInput>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <Label>{{ $t('mcp.env') }}</Label>
+                    <TagsInput
+                      :model-value="envTags.tagList.value"
+                      :add-on-blur="true"
+                      :convert-value="envTags.convertValue"
+                      @update:model-value="(tags) => envTags.handleUpdate(tags.map(String))"
+                    >
+                      <TagsInputItem
+                        v-for="(value, index) in envTags.tagList.value"
+                        :key="index"
+                        :value="value"
+                      >
+                        <TagsInputItemText />
+                        <TagsInputItemDelete />
+                      </TagsInputItem>
+                      <TagsInputInput
+                        :placeholder="$t('mcp.envPlaceholder')"
+                        class="w-full py-1"
+                      />
+                    </TagsInput>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <Label>{{ $t('mcp.cwd') }}</Label>
+                    <Input
+                      v-model="formData.cwd"
+                      :placeholder="$t('mcp.cwdPlaceholder')"
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent
+                  value="remote"
+                  class="mt-3 flex flex-col gap-3"
+                >
+                  <div class="space-y-1.5">
+                    <Label>URL</Label>
+                    <Input
+                      v-model="formData.url"
+                      placeholder="https://example.com/mcp"
+                    />
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <Label>Headers</Label>
+                    <TagsInput
+                      :model-value="headerTags.tagList.value"
+                      :add-on-blur="true"
+                      :convert-value="headerTags.convertValue"
+                      @update:model-value="(tags) => headerTags.handleUpdate(tags.map(String))"
+                    >
+                      <TagsInputItem
+                        v-for="(value, index) in headerTags.tagList.value"
+                        :key="index"
+                        :value="value"
+                      >
+                        <TagsInputItemText />
+                        <TagsInputItemDelete />
+                      </TagsInputItem>
+                      <TagsInputInput
+                        placeholder="Key:Value"
+                        class="w-full py-1"
+                      />
+                    </TagsInput>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <Label>Transport</Label>
+                    <Select v-model="formData.transport">
+                      <SelectTrigger class="w-full">
+                        <SelectValue placeholder="http" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="http">
+                            HTTP (Streamable)
+                          </SelectItem>
+                          <SelectItem value="sse">
+                            SSE
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              <div class="flex items-center gap-3">
+                <Label>{{ $t('mcp.active') }}</Label>
+                <Switch v-model:checked="formData.active" />
+              </div>
+
+              <DialogFooter class="mt-4">
+                <DialogClose as-child>
+                  <Button variant="outline">
+                    {{ $t('common.cancel') }}
+                  </Button>
+                </DialogClose>
+                <Button
+                  type="submit"
+                  :disabled="submitting || !formData.name.trim() || (connectionMode === 'stdio' ? !formData.command.trim() : !formData.url.trim())"
+                >
+                  <Spinner
+                    v-if="submitting"
+                    class="mr-1.5"
+                  />
+                  {{ $t('common.confirm') }}
+                </Button>
+              </DialogFooter>
+            </form>
+          </TabsContent>
+
+          <TabsContent
+            value="import"
+            class="mt-3 space-y-3"
+          >
+            <p class="text-sm text-muted-foreground">
+              {{ $t('mcp.importHint') }}
+            </p>
+            <Textarea
+              v-model="importJson"
+              rows="10"
+              class="font-mono text-xs"
+              :placeholder="importJsonPlaceholder"
             />
-            {{ $t('common.import') }}
-          </Button>
-        </DialogFooter>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                :disabled="importSubmitting || !importJson.trim()"
+                @click="handleImport"
+              >
+                <Spinner
+                  v-if="importSubmitting"
+                  class="mr-1.5"
+                />
+                {{ $t('common.import') }}
+              </Button>
+            </div>
+            <DialogFooter class="mt-4">
+              <DialogClose as-child>
+                <Button variant="outline">
+                  {{ $t('common.cancel') }}
+                </Button>
+              </DialogClose>
+            </DialogFooter>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
 
@@ -313,13 +371,14 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref, watch } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { type ColumnDef } from '@tanstack/vue-table'
 import {
   Badge,
   Button,
+  Checkbox,
   Dialog,
   DialogClose,
   DialogContent,
@@ -336,6 +395,10 @@ import {
   SelectValue,
   Spinner,
   Switch,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
   TagsInput,
   TagsInputInput,
   TagsInputItem,
@@ -356,6 +419,16 @@ interface McpItem {
   is_active: boolean
 }
 
+interface McpServerEntry {
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  cwd?: string
+  url?: string
+  headers?: Record<string, string>
+  transport?: string
+}
+
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
 
@@ -364,11 +437,22 @@ const items = ref<McpItem[]>([])
 const formDialogOpen = ref(false)
 const editingItem = ref<McpItem | null>(null)
 const submitting = ref(false)
-const importDialogOpen = ref(false)
+const addDialogTab = ref<'single' | 'import'>('single')
+const importJsonPlaceholder = `{
+  "mcpServers": {
+    "hello": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-hello-world"]
+    }
+  }
+}`
 const importJson = ref('')
 const importSubmitting = ref(false)
 const exportDialogOpen = ref(false)
 const exportJson = ref('')
+const selectedIds = ref<string[]>([])
+
+const connectionMode = ref<'stdio' | 'remote'>('stdio')
 
 const formData = ref({
   name: '',
@@ -377,6 +461,19 @@ const formData = ref({
   cwd: '',
   transport: 'http',
   active: true,
+})
+
+watch(connectionMode, (mode) => {
+  if (mode === 'stdio') {
+    formData.value.url = ''
+    formData.value.transport = 'http'
+    headerTags.initFromObject(null)
+  } else {
+    formData.value.command = ''
+    formData.value.cwd = ''
+    argsTags.value = []
+    envTags.initFromObject(null)
+  }
 })
 const argsTags = ref<string[]>([])
 const envTags = useKeyValueTags()
@@ -405,14 +502,70 @@ function configMap(config: Record<string, unknown>, key: string): Record<string,
   return {}
 }
 
-const columns: ColumnDef<McpItem>[] = [
+function toggleSelection(id: string, checked: boolean) {
+  const set = new Set(selectedIds.value)
+  if (checked) set.add(id)
+  else set.delete(id)
+  selectedIds.value = Array.from(set)
+}
+
+function toggleSelectAll(checked: boolean) {
+  selectedIds.value = checked ? items.value.map((i) => i.id) : []
+}
+
+const isAllSelected = computed(() =>
+  items.value.length > 0 && selectedIds.value.length === items.value.length,
+)
+
+function clearSelection() {
+  selectedIds.value = []
+}
+
+function itemToExportEntry(item: McpItem): McpServerEntry {
+  const cfg = item.config ?? {}
+  if (item.type === 'stdio') {
+    const entry: McpServerEntry = {
+      command: configValue(cfg, 'command') || undefined,
+      args: configArray(cfg, 'args').length ? configArray(cfg, 'args') : undefined,
+      cwd: configValue(cfg, 'cwd') || undefined,
+      env: Object.keys(configMap(cfg, 'env')).length ? configMap(cfg, 'env') : undefined,
+    }
+    return entry
+  }
+  const entry: McpServerEntry = {
+    url: configValue(cfg, 'url') || undefined,
+    headers: Object.keys(configMap(cfg, 'headers')).length ? configMap(cfg, 'headers') : undefined,
+    transport: item.type === 'sse' ? 'sse' : undefined,
+  }
+  return entry
+}
+
+const columns = computed<ColumnDef<McpItem>[]>(() => [
+  {
+    id: 'select',
+    header: () =>
+      h('div', { class: 'flex items-center justify-center py-4' }, [
+        h(Checkbox, {
+          checked: isAllSelected.value,
+          'onUpdate:checked': (v: boolean | 'indeterminate') => toggleSelectAll(v === true),
+        }),
+      ]),
+    cell: ({ row }) =>
+      h('div', { class: 'flex justify-center' }, [
+        h(Checkbox, {
+          checked: selectedIds.value.includes(row.original.id),
+          'onUpdate:checked': (v: boolean | 'indeterminate') =>
+            toggleSelection(row.original.id, v === true),
+        }),
+      ]),
+  },
   {
     accessorKey: 'name',
-    header: () => h('div', { class: 'text-left py-4' }, t('mcp.table.name')),
+    header: () => h('div', { class: 'text-left py-4' }, t('common.name')),
   },
   {
     accessorKey: 'type',
-    header: () => h('div', { class: 'text-left' }, t('mcp.table.type')),
+    header: () => h('div', { class: 'text-left' }, t('common.type')),
     cell: ({ row }) => h(Badge, { variant: 'outline' }, () => row.original.type),
   },
   {
@@ -453,7 +606,7 @@ const columns: ColumnDef<McpItem>[] = [
       }),
     ]),
   },
-]
+])
 
 async function loadList() {
   loading.value = true
@@ -464,7 +617,7 @@ async function loadList() {
     }) as { data: { items: McpItem[] } }
     items.value = data.items ?? []
   } catch (error) {
-    toast.error(resolveError(error, t('mcp.loadFailed')))
+    toast.error(resolveError(error, t('common.loadFailed')))
   } finally {
     loading.value = false
   }
@@ -472,6 +625,9 @@ async function loadList() {
 
 function openCreateDialog() {
   editingItem.value = null
+  addDialogTab.value = 'single'
+  importJson.value = ''
+  connectionMode.value = 'stdio'
   formData.value = { name: '', command: '', url: '', cwd: '', transport: 'http', active: true }
   argsTags.value = []
   envTags.initFromObject(null)
@@ -481,7 +637,9 @@ function openCreateDialog() {
 
 function openEditDialog(item: McpItem) {
   editingItem.value = item
+  addDialogTab.value = 'single'
   const cfg = item.config ?? {}
+  connectionMode.value = item.type === 'stdio' ? 'stdio' : 'remote'
   formData.value = {
     name: item.name,
     command: configValue(cfg, 'command'),
@@ -545,7 +703,7 @@ async function handleSubmit() {
     await loadList()
     toast.success(editingItem.value ? t('mcp.updateSuccess') : t('mcp.createSuccess'))
   } catch (error) {
-    toast.error(resolveError(error, t('mcp.saveFailed')))
+    toast.error(resolveError(error, t('common.saveFailed')))
   } finally {
     submitting.value = false
   }
@@ -557,11 +715,39 @@ async function handleDelete(id: string) {
       url: `/bots/${props.botId}/mcp/${id}`,
       throwOnError: true,
     })
+    selectedIds.value = selectedIds.value.filter((x) => x !== id)
     await loadList()
     toast.success(t('mcp.deleteSuccess'))
   } catch (error) {
     toast.error(resolveError(error, t('mcp.deleteFailed')))
   }
+}
+
+async function handleBatchDelete() {
+  if (selectedIds.value.length === 0) return
+  try {
+    await client.post({
+      url: `/bots/${props.botId}/mcp-ops/batch-delete`,
+      body: { ids: selectedIds.value },
+      throwOnError: true,
+    })
+    selectedIds.value = []
+    await loadList()
+    toast.success(t('mcp.deleteSuccess'))
+  } catch (error) {
+    toast.error(resolveError(error, t('mcp.deleteFailed')))
+  }
+}
+
+function handleBatchExport() {
+  const selected = items.value.filter((i) => selectedIds.value.includes(i.id))
+  if (selected.length === 0) return
+  const mcpServers: Record<string, McpServerEntry> = {}
+  selected.forEach((item) => {
+    mcpServers[item.name] = itemToExportEntry(item)
+  })
+  exportJson.value = JSON.stringify({ mcpServers }, null, 2)
+  exportDialogOpen.value = true
 }
 
 async function handleImport() {
@@ -576,7 +762,7 @@ async function handleImport() {
       body: parsed,
       throwOnError: true,
     })
-    importDialogOpen.value = false
+    formDialogOpen.value = false
     importJson.value = ''
     await loadList()
     toast.success(t('mcp.importSuccess'))

@@ -304,6 +304,27 @@ func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error 
 	})
 }
 
+// BatchDelete removes multiple MCP connections by IDs. Invalid IDs are skipped; at least one must succeed for no error.
+func (s *ConnectionService) BatchDelete(ctx context.Context, botID string, ids []string) error {
+	if s.queries == nil {
+		return fmt.Errorf("mcp queries not configured")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var lastErr error
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if err := s.Delete(ctx, botID, id); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
 func normalizeMCPConnection(row sqlc.McpConnection) (Connection, error) {
 	config, err := decodeMCPConfig(row.Config)
 	if err != nil {

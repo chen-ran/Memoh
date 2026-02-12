@@ -42,6 +42,7 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 	ops := e.Group("/bots/:bot_id/mcp-ops")
 	ops.PUT("/import", h.Import)
 	ops.GET("/export", h.Export)
+	ops.POST("/batch-delete", h.BatchDelete)
 }
 
 // List godoc
@@ -250,6 +251,46 @@ func (h *MCPHandler) Import(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
+}
+
+// BatchDeleteRequest is the body for batch delete.
+type BatchDeleteRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// BatchDelete godoc
+// @Summary Batch delete MCP connections
+// @Description Delete multiple MCP connections by IDs.
+// @Tags mcp
+// @Param payload body BatchDeleteRequest true "IDs to delete"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/mcp-ops/batch-delete [post]
+func (h *MCPHandler) BatchDelete(c echo.Context) error {
+	userID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
+	var req BatchDeleteRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if len(req.IDs) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "ids are required")
+	}
+	if err := h.service.BatchDelete(c.Request().Context(), botID, req.IDs); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // Export godoc
