@@ -39,6 +39,7 @@ var (
 // AccessPolicy controls bot access behavior.
 type AccessPolicy struct {
 	AllowPublicMember bool
+	AllowGuest        bool
 }
 
 // NewService creates a new bot service.
@@ -79,8 +80,13 @@ func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isA
 	if isAdmin || bot.OwnerUserID == userID {
 		return bot, nil
 	}
-	if policy.AllowPublicMember && bot.Type == BotTypePublic {
-		if _, err := s.GetMember(ctx, botID, userID); err == nil {
+	if bot.Type == BotTypePublic {
+		if policy.AllowPublicMember {
+			if _, err := s.GetMember(ctx, botID, userID); err == nil {
+				return bot, nil
+			}
+		}
+		if policy.AllowGuest && bot.AllowGuest {
 			return bot, nil
 		}
 	}
@@ -639,6 +645,7 @@ func toBot(row sqlc.Bot) (Bot, error) {
 		DisplayName:     displayName,
 		AvatarURL:       avatarURL,
 		IsActive:        row.IsActive,
+		AllowGuest:      row.AllowGuest,
 		Status:          strings.TrimSpace(row.Status),
 		CheckState:      BotCheckStateUnknown,
 		CheckIssueCount: 0,
@@ -844,12 +851,52 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot) ([]BotCh
 	}
 	checks = append(checks, dataCheck)
 
-	botID := uuid.UUID(row.ID.Bytes).String()
-	for _, checker := range s.checkers {
-		checks = append(checks, checker.CheckBot(ctx, botID)...)
-	}
-
 	return checks, nil
+}
+
+// builtinCheckKeys returns keys produced by buildRuntimeChecks.
+var builtinCheckKeys = []string{
+	BotCheckKeyContainerInit,
+	BotCheckKeyContainerRecord,
+	BotCheckKeyContainerTask,
+	BotCheckKeyContainerData,
+}
+
+// ListCheckKeys returns all available check keys for a bot (builtin + registered checkers).
+func (s *Service) ListCheckKeys(ctx context.Context, botID string) ([]string, error) {
+	keys := make([]string, 0, len(builtinCheckKeys)+8)
+	keys = append(keys, builtinCheckKeys...)
+	for _, checker := range s.checkers {
+		keys = append(keys, checker.CheckKeys(ctx, botID)...)
+	}
+	return keys, nil
+}
+
+// RunCheck evaluates a single check key for a bot.
+func (s *Service) RunCheck(ctx context.Context, botID, key string) (BotCheck, error) {
+	// Try registered checkers first (they own dynamic keys like mcp.*).
+	for _, checker := range s.checkers {
+		for _, k := range checker.CheckKeys(ctx, botID) {
+			if k == key {
+				return checker.RunCheck(ctx, botID, key), nil
+			}
+		}
+	}
+	// Fall back to builtin checks.
+	checks, err := s.ListChecks(ctx, botID)
+	if err != nil {
+		return BotCheck{}, err
+	}
+	for _, c := range checks {
+		if c.CheckKey == key {
+			return c, nil
+		}
+	}
+	return BotCheck{
+		CheckKey: key,
+		Status:   BotCheckStatusUnknown,
+		Summary:  "Check key not found.",
+	}, nil
 }
 
 func summarizeChecks(checks []BotCheck) (string, int32) {

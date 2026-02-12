@@ -661,6 +661,24 @@ func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, channelIdent
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.AccessPolicy{AllowPublicMember: false})
 }
 
+// requireBotAccessWithGuest is like requireBotAccess but also allows guest access
+// for public bots that have the allow_guest setting enabled.
+func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, error) {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return "", err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	policy := bots.AccessPolicy{AllowPublicMember: true, AllowGuest: true}
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, policy); err != nil {
+		return "", err
+	}
+	return botID, nil
+}
+
 // SetupBotContainer creates and starts the MCP container for a bot.
 func (h *ContainerdHandler) SetupBotContainer(ctx context.Context, botID string) error {
 	containerID := mcp.ContainerPrefix + botID

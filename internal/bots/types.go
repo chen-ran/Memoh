@@ -13,6 +13,7 @@ type Bot struct {
 	DisplayName     string         `json:"display_name"`
 	AvatarURL       string         `json:"avatar_url,omitempty"`
 	IsActive        bool           `json:"is_active"`
+	AllowGuest      bool           `json:"allow_guest"`
 	Status          string         `json:"status"`
 	CheckState      string         `json:"check_state"`
 	CheckIssueCount int32          `json:"check_issue_count"`
@@ -81,6 +82,11 @@ type ListChecksResponse struct {
 	Items []BotCheck `json:"items"`
 }
 
+// ListCheckKeysResponse wraps the list of available check keys.
+type ListCheckKeysResponse struct {
+	Keys []string `json:"keys"`
+}
+
 // ContainerLifecycle handles container lifecycle events bound to bot operations.
 type ContainerLifecycle interface {
 	SetupBotContainer(ctx context.Context, botID string) error
@@ -89,7 +95,10 @@ type ContainerLifecycle interface {
 
 // RuntimeChecker produces runtime check items for a bot.
 type RuntimeChecker interface {
-	CheckBot(ctx context.Context, botID string) []BotCheck
+	// CheckKeys returns the check keys this checker can evaluate for a bot.
+	CheckKeys(ctx context.Context, botID string) []string
+	// RunCheck evaluates a single check key and returns the result.
+	RunCheck(ctx context.Context, botID, key string) BotCheck
 }
 
 const (
