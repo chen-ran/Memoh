@@ -13,6 +13,7 @@ type MockLLM struct {
 	DecideFunc         func(ctx context.Context, req DecideRequest) (DecideResponse, error)
 	CompactFunc        func(ctx context.Context, req CompactRequest) (CompactResponse, error)
 	DetectLanguageFunc func(ctx context.Context, text string) (string, error)
+	TranslateFunc      func(ctx context.Context, req TranslateRequest) (TranslateResponse, error)
 }
 
 func (m *MockLLM) Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {
@@ -29,6 +30,12 @@ func (m *MockLLM) Compact(ctx context.Context, req CompactRequest) (CompactRespo
 }
 func (m *MockLLM) DetectLanguage(ctx context.Context, text string) (string, error) {
 	return m.DetectLanguageFunc(ctx, text)
+}
+func (m *MockLLM) Translate(ctx context.Context, req TranslateRequest) (TranslateResponse, error) {
+	if m.TranslateFunc != nil {
+		return m.TranslateFunc(ctx, req)
+	}
+	return TranslateResponse{}, fmt.Errorf("translate not mocked")
 }
 
 func TestService_Add_FullFlow(t *testing.T) {
@@ -119,5 +126,67 @@ func TestRankFusion_Logic(t *testing.T) {
 
 	if results[0].Score != results[1].Score {
 		// Symmetric case: both get same RRF score (e.g. 1/(k+1)+1/(k+2) for k=60).
+	}
+}
+
+func TestBuildMultilingualVariants_TranslateAndFallback(t *testing.T) {
+	ctx := context.Background()
+	translateCalls := 0
+	mockLLM := &MockLLM{
+		ExtractFunc: func(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {
+			return ExtractResponse{}, nil
+		},
+		DecideFunc: func(ctx context.Context, req DecideRequest) (DecideResponse, error) {
+			return DecideResponse{}, nil
+		},
+		DetectLanguageFunc: func(ctx context.Context, text string) (string, error) {
+			return "en", nil
+		},
+		TranslateFunc: func(ctx context.Context, req TranslateRequest) (TranslateResponse, error) {
+			translateCalls++
+			return TranslateResponse{
+				SourceLanguage: "en",
+				Translations: map[string]string{
+					"es": "hola",
+					"fr": "bonjour",
+				},
+			}, nil
+		},
+	}
+	s := &Service{
+		llm:    mockLLM,
+		logger: slog.Default(),
+	}
+
+	cache := map[string]TranslateResponse{}
+	variants, err := s.buildMultilingualVariants(ctx, "hello", []string{"es", "fr", "en"}, cache)
+	if err != nil {
+		t.Fatalf("build variants: %v", err)
+	}
+	if len(variants) != 3 {
+		t.Fatalf("expected 3 variants, got %d", len(variants))
+	}
+	if translateCalls != 1 {
+		t.Fatalf("expected translate call count 1, got %d", translateCalls)
+	}
+
+	_, err = s.buildMultilingualVariants(ctx, "hello", []string{"fr", "es", "en"}, cache)
+	if err != nil {
+		t.Fatalf("build variants second call: %v", err)
+	}
+	if translateCalls != 1 {
+		t.Fatalf("expected cached translate response, got calls=%d", translateCalls)
+	}
+
+	mockLLM.TranslateFunc = func(ctx context.Context, req TranslateRequest) (TranslateResponse, error) {
+		return TranslateResponse{}, fmt.Errorf("translate failed")
+	}
+	cache = map[string]TranslateResponse{}
+	variants, err = s.buildMultilingualVariants(ctx, "hello", []string{"es"}, cache)
+	if err != nil {
+		t.Fatalf("fallback variants: %v", err)
+	}
+	if len(variants) != 1 || variants[0].Text != "hello" {
+		t.Fatalf("expected fallback to original text, got %+v", variants)
 	}
 }

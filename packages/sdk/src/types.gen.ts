@@ -3763,6 +3763,40 @@ export type GetModelsCountResponses = {
 
 export type GetModelsCountResponse = GetModelsCountResponses[keyof GetModelsCountResponses];
 
+export type GetModelsMemoryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Memory-supported client type (openai, openai-compat, anthropic, google)
+         */
+        client_type?: string;
+    };
+    url: '/models/memory';
+};
+
+export type GetModelsMemoryErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetModelsMemoryError = GetModelsMemoryErrors[keyof GetModelsMemoryErrors];
+
+export type GetModelsMemoryResponses = {
+    /**
+     * OK
+     */
+    200: Array<ModelsGetResponse>;
+};
+
+export type GetModelsMemoryResponse = GetModelsMemoryResponses[keyof GetModelsMemoryResponses];
+
 export type DeleteModelsModelByModelIdData = {
     body?: never;
     path: {

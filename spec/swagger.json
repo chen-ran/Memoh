@@ -3418,6 +3418,46 @@
                 }
             }
         },
+        "/models/memory": {
+            "get": {
+                "description": "Get chat models supported by memory LLM pipeline",
+                "tags": [
+                    "models"
+                ],
+                "summary": "List memory-compatible models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Memory-supported client type (openai, openai-compat, anthropic, google)",
+                        "name": "client_type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.GetResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/models/model/{modelId}": {
             "get": {
                 "description": "Get a model configuration by its model_id field (e.g., gpt-4)",

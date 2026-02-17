@@ -37,6 +37,20 @@ const (
 	ClientTypeDashscope    ClientType = "dashscope"
 )
 
+var memorySupportedClientTypes = map[ClientType]struct{}{
+	ClientTypeOpenAI:       {},
+	ClientTypeOpenAICompat: {},
+	ClientTypeAnthropic:    {},
+	ClientTypeGoogle:       {},
+}
+
+// IsMemorySupportedClientType returns true when a provider client type
+// is supported by the memory LLM pipeline.
+func IsMemorySupportedClientType(clientType ClientType) bool {
+	_, ok := memorySupportedClientTypes[clientType]
+	return ok
+}
+
 type Model struct {
 	ModelID         string    `json:"model_id"`
 	Name            string    `json:"name"`

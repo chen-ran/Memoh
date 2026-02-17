@@ -3927,6 +3927,33 @@ paths:
       summary: Get model count
       tags:
       - models
+  /models/memory:
+    get:
+      description: Get chat models supported by memory LLM pipeline
+      parameters:
+      - description: Memory-supported client type (openai, openai-compat, anthropic,
+          google)
+        in: query
+        name: client_type
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GetResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List memory-compatible models
+      tags:
+      - models
   /models/model/{modelId}:
     delete:
       description: Delete a model configuration by its model_id field (e.g., gpt-4)

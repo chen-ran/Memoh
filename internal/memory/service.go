@@ -28,6 +28,12 @@ type Service struct {
 	defaultMultimodalModelID string
 }
 
+const (
+	multilingualLangScanMax   = 600
+	multilingualLangMinCount  = 1
+	multilingualLangsMaxCount = 4
+)
+
 func NewService(log *slog.Logger, llm LLM, embedder embeddings.Embedder, store *QdrantStore, resolver *embeddings.Resolver, bm25 *BM25Indexer, defaultTextModelID, defaultMultimodalModelID string) *Service {
 	return &Service{
 		llm:                      llm,
@@ -224,18 +230,27 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	if s.bm25 == nil {
 		return SearchResponse{}, fmt.Errorf("bm25 indexer not configured")
 	}
-	lang, err := s.detectLanguage(ctx, req.Query)
+	targetLangs := s.resolveTargetRecallLanguages(ctx, filters)
+	translateCache := map[string]TranslateResponse{}
+	variants, err := s.buildMultilingualVariants(ctx, req.Query, targetLangs, translateCache)
 	if err != nil {
 		return SearchResponse{}, err
 	}
-	termFreq, _, err := s.bm25.TermFrequencies(lang, req.Query)
-	if err != nil {
-		return SearchResponse{}, err
+	sparseQueries := make([]sparseQuery, 0, len(variants))
+	for _, variant := range variants {
+		query, qErr := s.buildSparseQuery(ctx, variant.Text)
+		if qErr != nil {
+			return SearchResponse{}, qErr
+		}
+		sparseQueries = append(sparseQueries, query)
 	}
-	indices, values := s.bm25.BuildQueryVector(lang, termFreq)
+	if len(sparseQueries) == 0 {
+		return SearchResponse{Results: []MemoryItem{}}, nil
+	}
 	wantStats := !req.NoStats
-	if len(req.Sources) == 0 {
-		points, scores, err := s.store.SearchSparse(ctx, indices, values, req.Limit, filters, wantStats)
+
+	if len(req.Sources) == 0 && len(sparseQueries) == 1 {
+		points, scores, err := s.store.SearchSparse(ctx, sparseQueries[0].Indices, sparseQueries[0].Values, req.Limit, filters, wantStats)
 		if err != nil {
 			return SearchResponse{}, err
 		}
@@ -252,11 +267,34 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		}
 		return SearchResponse{Results: results}, nil
 	}
-	pointsBySource, scoresBySource, err := s.store.SearchSparseBySources(ctx, indices, values, req.Limit, filters, req.Sources, wantStats)
-	if err != nil {
-		return SearchResponse{}, err
+
+	pointsBySource := map[string][]qdrantPoint{}
+	scoresBySource := map[string][]float64{}
+	for idx, query := range sparseQueries {
+		queryKey := fmt.Sprintf("%s#%d", query.Language, idx)
+		if len(req.Sources) == 0 {
+			points, scores, searchErr := s.store.SearchSparse(ctx, query.Indices, query.Values, req.Limit, filters, wantStats)
+			if searchErr != nil {
+				return SearchResponse{}, searchErr
+			}
+			pointsBySource[queryKey] = points
+			scoresBySource[queryKey] = scores
+			continue
+		}
+		pointsBySourceItem, scoresBySourceItem, searchErr := s.store.SearchSparseBySources(ctx, query.Indices, query.Values, req.Limit, filters, req.Sources, wantStats)
+		if searchErr != nil {
+			return SearchResponse{}, searchErr
+		}
+		for source, points := range pointsBySourceItem {
+			key := fmt.Sprintf("%s|%s", source, queryKey)
+			pointsBySource[key] = points
+			scoresBySource[key] = scoresBySourceItem[source]
+		}
 	}
-	// Build sparse vector lookup before fusion (fusion discards raw points).
+	if len(pointsBySource) == 0 {
+		return SearchResponse{Results: []MemoryItem{}}, nil
+	}
+
 	var sparseByID map[string]qdrantPoint
 	if wantStats {
 		sparseByID = make(map[string]qdrantPoint)
@@ -714,29 +752,32 @@ func (s *Service) addRawMessages(ctx context.Context, messages []Message, filter
 
 func (s *Service) collectCandidates(ctx context.Context, facts []string, filters map[string]any) ([]CandidateMemory, error) {
 	unique := map[string]CandidateMemory{}
+	targetLangs := s.resolveTargetRecallLanguages(ctx, filters)
+	translateCache := map[string]TranslateResponse{}
 	for _, fact := range facts {
 		if s.bm25 == nil {
 			return nil, fmt.Errorf("bm25 indexer not configured")
 		}
-		lang, err := s.detectLanguage(ctx, fact)
+		variants, err := s.buildMultilingualVariants(ctx, fact, targetLangs, translateCache)
 		if err != nil {
 			return nil, err
 		}
-		termFreq, _, err := s.bm25.TermFrequencies(lang, fact)
-		if err != nil {
-			return nil, err
-		}
-		indices, values := s.bm25.BuildQueryVector(lang, termFreq)
-		points, _, err := s.store.SearchSparse(ctx, indices, values, 5, filters, false)
-		if err != nil {
-			return nil, err
-		}
-		for _, point := range points {
-			item := payloadToMemoryItem(point.ID, point.Payload)
-			unique[item.ID] = CandidateMemory{
-				ID:       item.ID,
-				Memory:   item.Memory,
-				Metadata: item.Metadata,
+		for _, variant := range variants {
+			query, queryErr := s.buildSparseQuery(ctx, variant.Text)
+			if queryErr != nil {
+				return nil, queryErr
+			}
+			points, _, searchErr := s.store.SearchSparse(ctx, query.Indices, query.Values, 5, filters, false)
+			if searchErr != nil {
+				return nil, searchErr
+			}
+			for _, point := range points {
+				item := payloadToMemoryItem(point.ID, point.Payload)
+				unique[item.ID] = CandidateMemory{
+					ID:       item.ID,
+					Memory:   item.Memory,
+					Metadata: item.Metadata,
+				}
 			}
 		}
 	}
@@ -746,6 +787,115 @@ func (s *Service) collectCandidates(ctx context.Context, facts []string, filters
 		candidates = append(candidates, candidate)
 	}
 	return candidates, nil
+}
+
+type queryVariant struct {
+	Language string
+	Text     string
+}
+
+type sparseQuery struct {
+	Language string
+	Text     string
+	Indices  []uint32
+	Values   []float32
+}
+
+func (s *Service) buildSparseQuery(ctx context.Context, text string) (sparseQuery, error) {
+	lang, err := s.detectLanguage(ctx, text)
+	if err != nil {
+		return sparseQuery{}, err
+	}
+	termFreq, _, err := s.bm25.TermFrequencies(lang, text)
+	if err != nil {
+		return sparseQuery{}, err
+	}
+	indices, values := s.bm25.BuildQueryVector(lang, termFreq)
+	return sparseQuery{
+		Language: lang,
+		Text:     text,
+		Indices:  indices,
+		Values:   values,
+	}, nil
+}
+
+func (s *Service) resolveTargetRecallLanguages(ctx context.Context, filters map[string]any) []string {
+	if s.store == nil {
+		return nil
+	}
+	languages, err := s.store.LanguageComposition(ctx, filters, multilingualLangScanMax, multilingualLangMinCount)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("memory language composition failed", slog.Any("error", err))
+		}
+		return nil
+	}
+	if len(languages) > multilingualLangsMaxCount {
+		languages = languages[:multilingualLangsMaxCount]
+	}
+	return languages
+}
+
+func (s *Service) buildMultilingualVariants(ctx context.Context, text string, targetLangs []string, cache map[string]TranslateResponse) ([]queryVariant, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil, nil
+	}
+	sourceLang, err := s.detectLanguage(ctx, trimmed)
+	if err != nil {
+		return nil, err
+	}
+
+	variants := make([]queryVariant, 0, len(targetLangs)+1)
+	seen := map[string]struct{}{}
+	add := func(lang, content string) {
+		content = strings.TrimSpace(content)
+		lang = strings.ToLower(strings.TrimSpace(lang))
+		if content == "" {
+			return
+		}
+		key := lang + "\x00" + content
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		variants = append(variants, queryVariant{Language: lang, Text: content})
+	}
+	add(sourceLang, trimmed)
+
+	targets := make([]string, 0, len(targetLangs))
+	for _, lang := range targetLangs {
+		normalized := strings.ToLower(strings.TrimSpace(lang))
+		if normalized == "" || normalized == sourceLang || !isAllowedLanguageCode(normalized) {
+			continue
+		}
+		targets = append(targets, normalized)
+	}
+	if len(targets) == 0 || s.llm == nil {
+		return variants, nil
+	}
+
+	sort.Strings(targets)
+	cacheKey := trimmed + "\x00" + strings.Join(targets, ",")
+	translateResp, ok := cache[cacheKey]
+	if !ok {
+		translateResp, err = s.llm.Translate(ctx, TranslateRequest{
+			Text:            trimmed,
+			TargetLanguages: targets,
+		})
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("query translation failed; fallback to original text", slog.Any("error", err))
+			}
+			cache[cacheKey] = TranslateResponse{Translations: map[string]string{}}
+			return variants, nil
+		}
+		cache[cacheKey] = translateResp
+	}
+	for _, lang := range targets {
+		add(lang, translateResp.Translations[lang])
+	}
+	return variants, nil
 }
 
 func (s *Service) applyAdd(ctx context.Context, text string, filters map[string]any, metadata map[string]any, embeddingEnabled bool) (MemoryItem, error) {

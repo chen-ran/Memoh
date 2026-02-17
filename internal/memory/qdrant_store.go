@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -409,6 +410,70 @@ func (s *QdrantStore) Scroll(ctx context.Context, limit int, filters map[string]
 		})
 	}
 	return result, nextOffset, nil
+}
+
+// LanguageComposition scans payload.lang under filters and returns
+// language codes sorted by frequency desc.
+func (s *QdrantStore) LanguageComposition(ctx context.Context, filters map[string]any, maxScan, minCount int) ([]string, error) {
+	if maxScan <= 0 {
+		maxScan = 500
+	}
+	if minCount <= 0 {
+		minCount = 1
+	}
+	scanLimit := 200
+	counts := map[string]int{}
+	total := 0
+	var offset *qdrant.PointId
+	for total < maxScan {
+		remaining := maxScan - total
+		limit := scanLimit
+		if remaining < limit {
+			limit = remaining
+		}
+		points, nextOffset, err := s.Scroll(ctx, limit, filters, offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(points) == 0 {
+			break
+		}
+		total += len(points)
+		for _, point := range points {
+			raw := strings.ToLower(strings.TrimSpace(fmt.Sprint(point.Payload["lang"])))
+			if raw == "" || !isAllowedLanguageCode(raw) {
+				continue
+			}
+			counts[raw]++
+		}
+		if nextOffset == nil {
+			break
+		}
+		offset = nextOffset
+	}
+
+	type langCount struct {
+		lang  string
+		count int
+	}
+	items := make([]langCount, 0, len(counts))
+	for lang, count := range counts {
+		if count < minCount {
+			continue
+		}
+		items = append(items, langCount{lang: lang, count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count == items[j].count {
+			return items[i].lang < items[j].lang
+		}
+		return items[i].count > items[j].count
+	})
+	languages := make([]string, 0, len(items))
+	for _, item := range items {
+		languages = append(languages, item.lang)
+	}
+	return languages, nil
 }
 
 // extractSparseVector extracts sparse indices and values from a VectorsOutput.

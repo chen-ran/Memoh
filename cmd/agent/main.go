@@ -233,12 +233,10 @@ func provideMCPManager(log *slog.Logger, service ctr.Service, cfg config.Config,
 // ---------------------------------------------------------------------------
 
 func provideMemoryLLM(modelsService *models.Service, queries *dbsqlc.Queries, log *slog.Logger) memory.LLM {
-	return &lazyLLMClient{
+	return memory.NewDynamicLLM(log, &dbMemoryProviderResolver{
 		modelsService: modelsService,
 		queries:       queries,
-		timeout:       30 * time.Second,
-		logger:        log,
-	}
+	}, 30*time.Second, nil)
 }
 
 func provideEmbeddingsResolver(log *slog.Logger, modelsService *models.Service, queries *dbsqlc.Queries) *embeddings.Resolver {
@@ -629,66 +627,25 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, queries *dbsqlc.Quer
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// lazy LLM client
-// ---------------------------------------------------------------------------
-
-type lazyLLMClient struct {
+type dbMemoryProviderResolver struct {
 	modelsService *models.Service
 	queries       *dbsqlc.Queries
-	timeout       time.Duration
-	logger        *slog.Logger
 }
 
-func (c *lazyLLMClient) Extract(ctx context.Context, req memory.ExtractRequest) (memory.ExtractResponse, error) {
-	client, err := c.resolve(ctx)
+func (r *dbMemoryProviderResolver) ResolveMemoryProvider(ctx context.Context, botID string) (memory.ProviderConfig, error) {
+	if r.modelsService == nil || r.queries == nil {
+		return memory.ProviderConfig{}, fmt.Errorf("models service not configured")
+	}
+	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, r.modelsService, r.queries, botID)
 	if err != nil {
-		return memory.ExtractResponse{}, err
+		return memory.ProviderConfig{}, err
 	}
-	return client.Extract(ctx, req)
-}
-
-func (c *lazyLLMClient) Decide(ctx context.Context, req memory.DecideRequest) (memory.DecideResponse, error) {
-	client, err := c.resolve(ctx)
-	if err != nil {
-		return memory.DecideResponse{}, err
-	}
-	return client.Decide(ctx, req)
-}
-
-func (c *lazyLLMClient) Compact(ctx context.Context, req memory.CompactRequest) (memory.CompactResponse, error) {
-	client, err := c.resolve(ctx)
-	if err != nil {
-		return memory.CompactResponse{}, err
-	}
-	return client.Compact(ctx, req)
-}
-
-func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
-	client, err := c.resolve(ctx)
-	if err != nil {
-		return "", err
-	}
-	return client.DetectLanguage(ctx, text)
-}
-
-func (c *lazyLLMClient) resolve(ctx context.Context) (memory.LLM, error) {
-	if c.modelsService == nil || c.queries == nil {
-		return nil, fmt.Errorf("models service not configured")
-	}
-	botID := memory.BotIDFromContext(ctx)
-	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, c.modelsService, c.queries, botID)
-	if err != nil {
-		return nil, err
-	}
-	clientType := strings.ToLower(strings.TrimSpace(memoryProvider.ClientType))
-	switch clientType {
-	case "openai", "openai-compat", "azure", "mistral", "xai", "ollama", "dashscope":
-		// These providers support OpenAI-compatible /chat/completions endpoint
-	default:
-		return nil, fmt.Errorf("memory provider client type not supported: %s", memoryProvider.ClientType)
-	}
-	return memory.NewLLMClient(c.logger, memoryProvider.BaseUrl, memoryProvider.ApiKey, memoryModel.ModelID, c.timeout)
+	return memory.ProviderConfig{
+		ModelID:    memoryModel.ModelID,
+		BaseURL:    memoryProvider.BaseUrl,
+		APIKey:     memoryProvider.ApiKey,
+		ClientType: memoryProvider.ClientType,
+	}, nil
 }
 
 // skillLoaderAdapter bridges handlers.ContainerdHandler to flow.SkillLoader.

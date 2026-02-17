@@ -12,6 +12,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/models"
 )
 
 type Service struct {
@@ -80,7 +81,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	memoryModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.MemoryModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
+		modelID, err := s.resolveMemoryModelUUID(ctx, value)
 		if err != nil {
 			return Settings{}, err
 		}
@@ -197,4 +198,36 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 		return pgtype.UUID{}, err
 	}
 	return row.ID, nil
+}
+
+func (s *Service) resolveMemoryModelUUID(ctx context.Context, modelID string) (pgtype.UUID, error) {
+	if strings.TrimSpace(modelID) == "" {
+		return pgtype.UUID{}, fmt.Errorf("memory model id is required")
+	}
+	row, err := s.queries.GetModelByModelID(ctx, modelID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if strings.TrimSpace(row.Type) != string(models.ModelTypeChat) {
+		return pgtype.UUID{}, fmt.Errorf("memory model must be a chat model")
+	}
+	if !row.LlmProviderID.Valid {
+		return pgtype.UUID{}, fmt.Errorf("memory model provider is required")
+	}
+	provider, err := s.queries.GetLlmProviderByID(ctx, row.LlmProviderID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if err := validateMemoryProviderClientType(provider.ClientType); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return row.ID, nil
+}
+
+func validateMemoryProviderClientType(clientType string) error {
+	ct := models.ClientType(strings.ToLower(strings.TrimSpace(clientType)))
+	if models.IsMemorySupportedClientType(ct) {
+		return nil
+	}
+	return fmt.Errorf("memory model provider type not supported: %s", clientType)
 }

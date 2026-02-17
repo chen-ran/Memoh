@@ -274,3 +274,12 @@ func TestModelTypes(t *testing.T) {
 		assert.Equal(t, models.ClientType("dashscope"), models.ClientTypeDashscope)
 	})
 }
+
+func TestIsMemorySupportedClientType(t *testing.T) {
+	assert.True(t, models.IsMemorySupportedClientType(models.ClientTypeOpenAI))
+	assert.True(t, models.IsMemorySupportedClientType(models.ClientTypeOpenAICompat))
+	assert.True(t, models.IsMemorySupportedClientType(models.ClientTypeAnthropic))
+	assert.True(t, models.IsMemorySupportedClientType(models.ClientTypeGoogle))
+	assert.False(t, models.IsMemorySupportedClientType(models.ClientTypeAzure))
+	assert.False(t, models.IsMemorySupportedClientType(models.ClientTypeBedrock))
+}

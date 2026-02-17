@@ -17,7 +17,7 @@
       <Label>{{ $t('bots.settings.memoryModel') }}</Label>
       <ModelSelect
         v-model="form.memory_model_id"
-        :models="models"
+        :models="memoryModels"
         :providers="providers"
         model-type="chat"
         :placeholder="$t('bots.settings.memoryModel')"
@@ -141,7 +141,7 @@ import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from './model-select.vue'
 import SearchProviderSelect from './search-provider-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders } from '@memoh/sdk'
+import { getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getModelsMemory, getProviders, getSearchProviders } from '@memoh/sdk'
 import type { SettingsSettings } from '@memoh/sdk'
 import type { Ref } from 'vue'
 
@@ -173,6 +173,14 @@ const { data: modelData } = useQuery({
   key: ['all-models'],
   query: async () => {
     const { data } = await getModels({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: memoryModelData } = useQuery({
+  key: ['memory-models'],
+  query: async () => {
+    const { data } = await getModelsMemory({ throwOnError: true })
     return data
   },
 })
@@ -216,6 +224,7 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
 })
 
 const models = computed(() => modelData.value ?? [])
+const memoryModels = computed(() => memoryModelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const searchProviders = computed(() => searchProviderData.value ?? [])
 

@@ -8,6 +8,7 @@ type LLM interface {
 	Decide(ctx context.Context, req DecideRequest) (DecideResponse, error)
 	Compact(ctx context.Context, req CompactRequest) (CompactResponse, error)
 	DetectLanguage(ctx context.Context, text string) (string, error)
+	Translate(ctx context.Context, req TranslateRequest) (TranslateResponse, error)
 }
 
 type Message struct {
@@ -166,6 +167,16 @@ type CompactRequest struct {
 
 type CompactResponse struct {
 	Facts []string `json:"facts"`
+}
+
+type TranslateRequest struct {
+	Text            string   `json:"text"`
+	TargetLanguages []string `json:"target_languages"`
+}
+
+type TranslateResponse struct {
+	SourceLanguage string            `json:"source_language,omitempty"`
+	Translations   map[string]string `json:"translations"`
 }
 
 type CompactResult struct {

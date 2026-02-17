@@ -156,6 +156,27 @@ Before finalizing, verify the value is one of the allowed codes.`
 	return systemPrompt, userPrompt
 }
 
+func getTranslationMessages(text string, targetLanguages []string) (string, string) {
+	targets := strings.Join(targetLanguages, ", ")
+	systemPrompt := fmt.Sprintf(`You are a professional translator.
+Translate the input text into all target languages.
+
+Rules:
+- Target languages: %s
+- Keep original meaning and tone.
+- Return valid JSON only.
+- Output format:
+  {"source_language":"<code>","translations":{"<code>":"<translated text>"}}
+- "translations" keys must be language codes.
+- Include all requested target language codes in "translations".
+- Allowed language codes: ar, bg, ca, cjk, ckb, da, de, el, en, es, eu, fa, fi, fr, ga, gl, hi, hr, hu, hy, id, in, it, nl, no, pl, pt, ro, ru, sv, tr.
+- For Chinese/Japanese/Korean target, use code "cjk".
+- DO NOT RETURN ANYTHING ELSE OTHER THAN JSON.
+- DO NOT ADD CODEBLOCK WRAPPERS LIKE "%s" OR "%s".`, targets, "```json", "```")
+	userPrompt := fmt.Sprintf("Target languages: %s\nText:\n%s", targets, text)
+	return systemPrompt, userPrompt
+}
+
 func removeCodeBlocks(text string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(text, "```json", ""), "```", "")
 }

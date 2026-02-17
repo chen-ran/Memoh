@@ -26,6 +26,7 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 	group := e.Group("/models")
 	group.POST("", h.Create)
 	group.GET("", h.List)
+	group.GET("/memory", h.ListMemory)
 	group.GET("/:id", h.GetByID)
 	group.GET("/model/:modelId", h.GetByModelID)
 	group.PUT("/:id", h.UpdateByID)
@@ -82,6 +83,45 @@ func (h *ModelsHandler) List(c echo.Context) error {
 		resp, err = h.service.List(c.Request().Context())
 	}
 
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// ListMemory godoc
+// @Summary List memory-compatible models
+// @Description Get chat models supported by memory LLM pipeline
+// @Tags models
+// @Param client_type query string false "Memory-supported client type (openai, openai-compat, anthropic, google)"
+// @Success 200 {array} models.GetResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /models/memory [get]
+func (h *ModelsHandler) ListMemory(c echo.Context) error {
+	clientType := c.QueryParam("client_type")
+	var (
+		resp []models.GetResponse
+		err  error
+	)
+	if clientType != "" {
+		ct := models.ClientType(clientType)
+		if !models.IsMemorySupportedClientType(ct) {
+			return echo.NewHTTPError(http.StatusBadRequest, "client_type is not memory compatible")
+		}
+		items, listErr := h.service.ListByClientType(c.Request().Context(), ct)
+		if listErr != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, listErr.Error())
+		}
+		resp = make([]models.GetResponse, 0, len(items))
+		for _, item := range items {
+			if item.Type == models.ModelTypeChat {
+				resp = append(resp, item)
+			}
+		}
+		return c.JSON(http.StatusOK, resp)
+	}
+	resp, err = h.service.ListMemoryCompatible(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

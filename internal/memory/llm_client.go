@@ -1,53 +1,188 @@
 package memory
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
+
+	"github.com/go-kratos/blades"
+	bladesanthropic "github.com/go-kratos/blades/contrib/anthropic"
+	bladesgemini "github.com/go-kratos/blades/contrib/gemini"
+	bladesopenai "github.com/go-kratos/blades/contrib/openai"
+	"google.golang.org/genai"
 )
 
-type LLMClient struct {
-	baseURL string
-	apiKey  string
-	model   string
-	logger  *slog.Logger
-	http    *http.Client
+// ProviderConfig describes provider/model settings for memory LLM calls.
+type ProviderConfig struct {
+	ModelID    string
+	BaseURL    string
+	APIKey     string
+	ClientType string
 }
 
-func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.Duration) (*LLMClient, error) {
-	if strings.TrimSpace(baseURL) == "" {
-		return nil, fmt.Errorf("llm client: base url is required")
-	}
-	if strings.TrimSpace(apiKey) == "" {
-		return nil, fmt.Errorf("llm client: api key is required")
-	}
-	if strings.TrimSpace(model) == "" {
-		return nil, fmt.Errorf("llm client: model is required")
-	}
+// ProviderResolver resolves provider config for a bot at runtime.
+type ProviderResolver interface {
+	ResolveMemoryProvider(ctx context.Context, botID string) (ProviderConfig, error)
+}
+
+// LLMClientFactory creates a concrete memory LLM client from provider config.
+type LLMClientFactory func(log *slog.Logger, cfg ProviderConfig, timeout time.Duration) (LLM, error)
+
+// DynamicLLM resolves provider/model at call time then delegates to concrete client.
+type DynamicLLM struct {
+	resolver ProviderResolver
+	factory  LLMClientFactory
+	timeout  time.Duration
+	logger   *slog.Logger
+}
+
+// NewDynamicLLM creates a DI-friendly lazy memory LLM gateway.
+func NewDynamicLLM(log *slog.Logger, resolver ProviderResolver, timeout time.Duration, factory LLMClientFactory) *DynamicLLM {
 	if log == nil {
 		log = slog.Default()
 	}
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = 30 * time.Second
 	}
-	return &LLMClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		model:   model,
-		logger:  log.With(slog.String("client", "llm")),
-		http: &http.Client{
-			Timeout: timeout,
-		},
+	if factory == nil {
+		factory = NewLLMClientForProvider
+	}
+	return &DynamicLLM{
+		resolver: resolver,
+		factory:  factory,
+		timeout:  timeout,
+		logger:   log.With(slog.String("client", "memory_dynamic_llm")),
+	}
+}
+
+func (d *DynamicLLM) Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {
+	client, err := d.resolve(ctx)
+	if err != nil {
+		return ExtractResponse{}, err
+	}
+	return client.Extract(ctx, req)
+}
+
+func (d *DynamicLLM) Decide(ctx context.Context, req DecideRequest) (DecideResponse, error) {
+	client, err := d.resolve(ctx)
+	if err != nil {
+		return DecideResponse{}, err
+	}
+	return client.Decide(ctx, req)
+}
+
+func (d *DynamicLLM) Compact(ctx context.Context, req CompactRequest) (CompactResponse, error) {
+	client, err := d.resolve(ctx)
+	if err != nil {
+		return CompactResponse{}, err
+	}
+	return client.Compact(ctx, req)
+}
+
+func (d *DynamicLLM) DetectLanguage(ctx context.Context, text string) (string, error) {
+	client, err := d.resolve(ctx)
+	if err != nil {
+		return "", err
+	}
+	return client.DetectLanguage(ctx, text)
+}
+
+func (d *DynamicLLM) Translate(ctx context.Context, req TranslateRequest) (TranslateResponse, error) {
+	client, err := d.resolve(ctx)
+	if err != nil {
+		return TranslateResponse{}, err
+	}
+	return client.Translate(ctx, req)
+}
+
+func (d *DynamicLLM) resolve(ctx context.Context) (LLM, error) {
+	if d.resolver == nil {
+		return nil, fmt.Errorf("memory provider resolver not configured")
+	}
+	cfg, err := d.resolver.ResolveMemoryProvider(ctx, BotIDFromContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	clientType := strings.ToLower(strings.TrimSpace(cfg.ClientType))
+	switch clientType {
+	case "openai", "openai-compat", "anthropic", "google":
+	default:
+		return nil, fmt.Errorf("memory provider client type not supported: %s", cfg.ClientType)
+	}
+	return d.factory(d.logger, cfg, d.timeout)
+}
+
+type llmClient struct {
+	provider blades.ModelProvider
+	logger   *slog.Logger
+}
+
+// NewLLMClient keeps the old constructor shape and builds an OpenAI-compatible client.
+func NewLLMClient(log *slog.Logger, baseURL, apiKey, model string, timeout time.Duration) (LLM, error) {
+	return NewLLMClientForProvider(log, ProviderConfig{
+		ModelID:    model,
+		BaseURL:    baseURL,
+		APIKey:     apiKey,
+		ClientType: "openai-compat",
+	}, timeout)
+}
+
+// NewLLMClientForProvider builds a memory LLM client backed by Blades providers.
+func NewLLMClientForProvider(log *slog.Logger, cfg ProviderConfig, _ time.Duration) (LLM, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+	modelID := strings.TrimSpace(cfg.ModelID)
+	if modelID == "" {
+		return nil, fmt.Errorf("llm client: model is required")
+	}
+	clientType := strings.ToLower(strings.TrimSpace(cfg.ClientType))
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	apiKey := strings.TrimSpace(cfg.APIKey)
+
+	var provider blades.ModelProvider
+	switch clientType {
+	case "openai", "openai-compat":
+		provider = bladesopenai.NewModel(modelID, bladesopenai.Config{
+			BaseURL:     baseURL,
+			APIKey:      apiKey,
+			Temperature: 0,
+		})
+	case "anthropic":
+		provider = bladesanthropic.NewModel(modelID, bladesanthropic.Config{
+			BaseURL:     baseURL,
+			APIKey:      apiKey,
+			Temperature: 0,
+		})
+	case "google":
+		gcfg := bladesgemini.Config{
+			ClientConfig: genai.ClientConfig{
+				APIKey:  apiKey,
+				Backend: genai.BackendGeminiAPI,
+			},
+		}
+		if baseURL != "" {
+			gcfg.ClientConfig.HTTPOptions = genai.HTTPOptions{BaseURL: baseURL}
+		}
+		p, err := bladesgemini.NewModel(context.Background(), modelID, gcfg)
+		if err != nil {
+			return nil, err
+		}
+		provider = p
+	default:
+		return nil, fmt.Errorf("memory provider client type not supported: %s", cfg.ClientType)
+	}
+
+	return &llmClient{
+		provider: provider,
+		logger:   log.With(slog.String("client", "memory_llm")),
 	}, nil
 }
 
-func (c *LLMClient) Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {
+func (c *llmClient) Extract(ctx context.Context, req ExtractRequest) (ExtractResponse, error) {
 	if len(req.Messages) == 0 {
 		return ExtractResponse{}, fmt.Errorf("messages is required")
 	}
@@ -60,15 +195,14 @@ func (c *LLMClient) Extract(ctx context.Context, req ExtractRequest) (ExtractRes
 	if err != nil {
 		return ExtractResponse{}, err
 	}
-
 	var parsed ExtractResponse
-	if err := json.Unmarshal([]byte(removeCodeBlocks(content)), &parsed); err != nil {
+	if err := jsonUnmarshalText(content, &parsed); err != nil {
 		return ExtractResponse{}, err
 	}
 	return parsed, nil
 }
 
-func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideResponse, error) {
+func (c *llmClient) Decide(ctx context.Context, req DecideRequest) (DecideResponse, error) {
 	if len(req.Facts) == 0 {
 		return DecideResponse{}, fmt.Errorf("facts is required")
 	}
@@ -89,19 +223,17 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 
 	cleaned := removeCodeBlocks(content)
 	var memoryItems []map[string]any
-
-	// Try parsing as object first
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(cleaned), &raw); err == nil {
 		memoryItems = normalizeMemoryItems(raw["memory"])
 	} else {
-		// If object parsing fails, try parsing as array directly
 		var arr []any
 		if err := json.Unmarshal([]byte(cleaned), &arr); err != nil {
 			return DecideResponse{}, fmt.Errorf("failed to parse LLM response: %w", err)
 		}
 		memoryItems = normalizeMemoryItems(arr)
 	}
+
 	actions := make([]DecisionAction, 0, len(memoryItems))
 	for _, item := range memoryItems {
 		event := strings.ToUpper(asString(item["event"]))
@@ -111,7 +243,6 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 		if event == "NONE" {
 			continue
 		}
-
 		text := asString(item["text"])
 		if text == "" {
 			text = asString(item["fact"])
@@ -119,7 +250,6 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-
 		actions = append(actions, DecisionAction{
 			Event:     event,
 			ID:        asString(item["id"]),
@@ -130,7 +260,7 @@ func (c *LLMClient) Decide(ctx context.Context, req DecideRequest) (DecideRespon
 	return DecideResponse{Actions: actions}, nil
 }
 
-func (c *LLMClient) Compact(ctx context.Context, req CompactRequest) (CompactResponse, error) {
+func (c *llmClient) Compact(ctx context.Context, req CompactRequest) (CompactResponse, error) {
 	if len(req.Memories) == 0 {
 		return CompactResponse{}, fmt.Errorf("memories is required")
 	}
@@ -154,13 +284,13 @@ func (c *LLMClient) Compact(ctx context.Context, req CompactRequest) (CompactRes
 		return CompactResponse{}, err
 	}
 	var parsed CompactResponse
-	if err := json.Unmarshal([]byte(removeCodeBlocks(content)), &parsed); err != nil {
+	if err := jsonUnmarshalText(content, &parsed); err != nil {
 		return CompactResponse{}, fmt.Errorf("failed to parse compact response: %w", err)
 	}
 	return parsed, nil
 }
 
-func (c *LLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
+func (c *llmClient) DetectLanguage(ctx context.Context, text string) (string, error) {
 	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf("text is required")
 	}
@@ -175,7 +305,7 @@ func (c *LLMClient) DetectLanguage(ctx context.Context, text string) (string, er
 	var parsed struct {
 		Language string `json:"language"`
 	}
-	if err := json.Unmarshal([]byte(removeCodeBlocks(content)), &parsed); err != nil {
+	if err := jsonUnmarshalText(content, &parsed); err != nil {
 		return "", err
 	}
 	lang := strings.ToLower(strings.TrimSpace(parsed.Language))
@@ -185,65 +315,106 @@ func (c *LLMClient) DetectLanguage(ctx context.Context, text string) (string, er
 	return lang, nil
 }
 
+func (c *llmClient) Translate(ctx context.Context, req TranslateRequest) (TranslateResponse, error) {
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return TranslateResponse{}, fmt.Errorf("text is required")
+	}
+	if len(req.TargetLanguages) == 0 {
+		return TranslateResponse{}, fmt.Errorf("target_languages is required")
+	}
+	targets := make([]string, 0, len(req.TargetLanguages))
+	seen := make(map[string]struct{}, len(req.TargetLanguages))
+	for _, lang := range req.TargetLanguages {
+		normalized := strings.ToLower(strings.TrimSpace(lang))
+		if normalized == "" {
+			continue
+		}
+		if !isAllowedLanguageCode(normalized) {
+			return TranslateResponse{}, fmt.Errorf("unsupported target language code: %s", lang)
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		targets = append(targets, normalized)
+	}
+	if len(targets) == 0 {
+		return TranslateResponse{}, fmt.Errorf("target_languages is required")
+	}
+
+	systemPrompt, userPrompt := getTranslationMessages(text, targets)
+	content, err := c.callChat(ctx, []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	})
+	if err != nil {
+		return TranslateResponse{}, err
+	}
+	var parsed TranslateResponse
+	if err := jsonUnmarshalText(content, &parsed); err != nil {
+		return TranslateResponse{}, fmt.Errorf("failed to parse translation response: %w", err)
+	}
+	if parsed.Translations == nil {
+		parsed.Translations = map[string]string{}
+	}
+	for _, target := range targets {
+		if strings.TrimSpace(parsed.Translations[target]) == "" {
+			return TranslateResponse{}, fmt.Errorf("translation missing for language: %s", target)
+		}
+	}
+	if parsed.SourceLanguage != "" {
+		parsed.SourceLanguage = strings.ToLower(strings.TrimSpace(parsed.SourceLanguage))
+		if !isAllowedLanguageCode(parsed.SourceLanguage) {
+			parsed.SourceLanguage = ""
+		}
+	}
+	return parsed, nil
+}
+
+func (c *llmClient) callChat(ctx context.Context, messages []chatMessage) (string, error) {
+	if c.provider == nil {
+		return "", fmt.Errorf("llm provider not configured")
+	}
+	req := &blades.ModelRequest{
+		Messages: toBladesMessages(messages),
+	}
+	resp, err := c.provider.Generate(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.Message == nil {
+		return "", fmt.Errorf("llm response missing content")
+	}
+	content := strings.TrimSpace(resp.Message.Text())
+	if content == "" {
+		return "", fmt.Errorf("llm response missing content")
+	}
+	return content, nil
+}
+
+func toBladesMessages(messages []chatMessage) []*blades.Message {
+	out := make([]*blades.Message, 0, len(messages))
+	for _, msg := range messages {
+		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		case "system":
+			out = append(out, blades.SystemMessage(msg.Content))
+		case "assistant":
+			out = append(out, blades.AssistantMessage(msg.Content))
+		default:
+			out = append(out, blades.UserMessage(msg.Content))
+		}
+	}
+	return out
+}
+
+func jsonUnmarshalText(content string, out any) error {
+	return json.Unmarshal([]byte(removeCodeBlocks(content)), out)
+}
+
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}
-
-type chatRequest struct {
-	Model          string            `json:"model"`
-	Temperature    float32           `json:"temperature"`
-	ResponseFormat map[string]string `json:"response_format,omitempty"`
-	Messages       []chatMessage     `json:"messages"`
-}
-
-type chatResponse struct {
-	Choices []struct {
-		Message chatMessage `json:"message"`
-	} `json:"choices"`
-}
-
-func (c *LLMClient) callChat(ctx context.Context, messages []chatMessage) (string, error) {
-	if c.apiKey == "" {
-		return "", fmt.Errorf("llm api key is required")
-	}
-	body, err := json.Marshal(chatRequest{
-		Model:       c.model,
-		Temperature: 0,
-		ResponseFormat: map[string]string{
-			"type": "json_object",
-		},
-		Messages: messages,
-	})
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("llm error: %s", strings.TrimSpace(string(b)))
-	}
-
-	var parsed chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return "", err
-	}
-	if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
-		return "", fmt.Errorf("llm response missing content")
-	}
-	return parsed.Choices[0].Message.Content, nil
 }
 
 func formatMessages(messages []Message) []string {
@@ -283,7 +454,6 @@ func normalizeMemoryItems(value any) []map[string]any {
 		}
 		return items
 	case map[string]any:
-		// If this map looks like a single item, wrap it.
 		if _, hasText := typed["text"]; hasText {
 			return []map[string]any{typed}
 		}
@@ -293,7 +463,6 @@ func normalizeMemoryItems(value any) []map[string]any {
 		if _, hasEvent := typed["event"]; hasEvent {
 			return []map[string]any{typed}
 		}
-		// Otherwise treat as map of items.
 		items := make([]map[string]any, 0, len(typed))
 		for _, item := range typed {
 			if m, ok := item.(map[string]any); ok {

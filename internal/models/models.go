@@ -148,6 +148,35 @@ func (s *Service) ListByClientType(ctx context.Context, clientType ClientType) (
 	return convertToGetResponseList(dbModels), nil
 }
 
+// ListMemoryCompatible returns chat models supported by memory LLM pipeline.
+func (s *Service) ListMemoryCompatible(ctx context.Context) ([]GetResponse, error) {
+	clientTypes := []ClientType{
+		ClientTypeOpenAI,
+		ClientTypeOpenAICompat,
+		ClientTypeAnthropic,
+		ClientTypeGoogle,
+	}
+	seen := map[string]struct{}{}
+	results := make([]GetResponse, 0)
+	for _, clientType := range clientTypes {
+		items, err := s.ListByClientType(ctx, clientType)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if item.Type != ModelTypeChat {
+				continue
+			}
+			if _, ok := seen[item.ModelID]; ok {
+				continue
+			}
+			seen[item.ModelID] = struct{}{}
+			results = append(results, item)
+		}
+	}
+	return results, nil
+}
+
 // ListByProviderID returns models filtered by provider ID.
 func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]GetResponse, error) {
 	if strings.TrimSpace(providerID) == "" {
