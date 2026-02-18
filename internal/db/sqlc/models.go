@@ -17,6 +17,7 @@ type Bot struct {
 	IsActive           bool               `json:"is_active"`
 	Status             string             `json:"status"`
 	MaxContextLoadTime int32              `json:"max_context_load_time"`
+	MaxContextTokens   int32              `json:"max_context_tokens"`
 	Language           string             `json:"language"`
 	AllowGuest         bool               `json:"allow_guest"`
 	ChatModelID        pgtype.UUID        `json:"chat_model_id"`
@@ -69,6 +70,7 @@ type BotHistoryMessage struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 

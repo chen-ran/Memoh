@@ -673,6 +673,7 @@ export type MessageMessage = {
     sender_display_name?: string;
     sender_user_id?: string;
     source_reply_to_message_id?: string;
+    usage?: Array<number>;
 };
 
 export type MessageMessageAsset = {
@@ -866,6 +867,7 @@ export type SettingsSettings = {
     embedding_model_id?: string;
     language?: string;
     max_context_load_time?: number;
+    max_context_tokens?: number;
     memory_model_id?: string;
     search_provider_id?: string;
 };
@@ -876,6 +878,7 @@ export type SettingsUpsertRequest = {
     embedding_model_id?: string;
     language?: string;
     max_context_load_time?: number;
+    max_context_tokens?: number;
     memory_model_id?: string;
     search_provider_id?: string;
 };

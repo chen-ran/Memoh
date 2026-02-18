@@ -6451,6 +6451,12 @@ const docTemplate = `{
                 },
                 "source_reply_to_message_id": {
                     "type": "string"
+                },
+                "usage": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -6949,6 +6955,9 @@ const docTemplate = `{
                 "max_context_load_time": {
                     "type": "integer"
                 },
+                "max_context_tokens": {
+                    "type": "integer"
+                },
                 "memory_model_id": {
                     "type": "string"
                 },
@@ -6973,6 +6982,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "max_context_load_time": {
+                    "type": "integer"
+                },
+                "max_context_tokens": {
                     "type": "integer"
                 },
                 "memory_model_id": {

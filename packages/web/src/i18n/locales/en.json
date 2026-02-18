@@ -354,6 +354,7 @@
       "searchProvider": "Search Provider",
       "searchProviderPlaceholder": "Select search provider",
       "maxContextLoadTime": "Max Context Load Time",
+      "maxContextTokens": "Max Context Tokens",
       "language": "Language",
       "allowGuest": "Allow Guest Access",
       "allowGuestPersonalHint": "Personal bots do not support guest access. Use a public bot instead.",

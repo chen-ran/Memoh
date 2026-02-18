@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS bots (
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
   max_context_load_time INTEGER NOT NULL DEFAULT 1440,
+  max_context_tokens INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT 'auto',
   allow_guest BOOLEAN NOT NULL DEFAULT false,
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -242,6 +243,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
   content JSONB NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  usage JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

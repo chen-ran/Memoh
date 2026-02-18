@@ -79,6 +79,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		Role:                    input.Role,
 		Content:                 content,
 		Metadata:                metaBytes,
+		Usage:                   input.Usage,
 	})
 	if err != nil {
 		return Message{}, err
@@ -213,6 +214,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -232,6 +234,7 @@ func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -251,6 +254,7 @@ func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -270,6 +274,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }
@@ -288,6 +293,7 @@ func toMessageFields(
 	role string,
 	content []byte,
 	metadata []byte,
+	usage []byte,
 	createdAt pgtype.Timestamptz,
 ) Message {
 	return Message{
@@ -304,6 +310,7 @@ func toMessageFields(
 		Role:                    role,
 		Content:                 json.RawMessage(content),
 		Metadata:                parseJSONMap(metadata),
+		Usage:                   json.RawMessage(usage),
 		CreatedAt:               createdAt.Time,
 	}
 }
@@ -347,6 +354,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 		row.Role,
 		row.Content,
 		row.Metadata,
+		row.Usage,
 		row.CreatedAt,
 	)
 }

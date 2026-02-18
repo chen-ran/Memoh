@@ -150,6 +150,12 @@ type gatewayRequest struct {
 type gatewayResponse struct {
 	Messages []conversation.ModelMessage `json:"messages"`
 	Skills   []string                    `json:"skills"`
+	Usage    json.RawMessage             `json:"usage,omitempty"`
+}
+
+type gatewayUsage struct {
+	InputTokens  *int `json:"inputTokens"`
+	OutputTokens *int `json:"outputTokens"`
 }
 
 // gatewaySchedule matches the agent gateway ScheduleModel for /chat/trigger-schedule.
@@ -212,13 +218,15 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, err
 	}
 	maxCtx := coalescePositiveInt(req.MaxContextLoadTime, botSettings.MaxContextLoadTime, defaultMaxContextMinutes)
+	maxTokens := botSettings.MaxContextTokens
 
 	var messages []conversation.ModelMessage
 	if !skipHistory && r.conversationSvc != nil {
-		messages, err = r.loadMessages(ctx, req.ChatID, maxCtx)
-		if err != nil {
-			return resolvedContext{}, err
+		loaded, loadErr := r.loadMessages(ctx, req.ChatID, maxCtx)
+		if loadErr != nil {
+			return resolvedContext{}, loadErr
 		}
+		messages = trimMessagesByTokens(loaded, maxTokens)
 	}
 	if memoryMsg := r.loadMemoryContextMessage(ctx, req); memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
@@ -291,7 +299,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
-	if err := r.storeRound(ctx, req, resp.Messages); err != nil {
+	if err := r.storeRound(ctx, req, resp.Messages, resp.Usage); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 	return conversation.ChatResponse{
@@ -345,7 +353,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	if err != nil {
 		return err
 	}
-	return r.storeRound(ctx, req, resp.Messages)
+	return r.storeRound(ctx, req, resp.Messages, resp.Usage)
 }
 
 // --- StreamChat ---
@@ -552,7 +560,7 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	if eventType == "done" {
 		var resp gatewayResponse
 		if err := json.Unmarshal([]byte(data), &resp); err == nil && len(resp.Messages) > 0 {
-			return true, r.storeRound(ctx, req, resp.Messages)
+			return true, r.storeRound(ctx, req, resp.Messages, resp.Usage)
 		}
 	}
 
@@ -562,15 +570,16 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 		Data     json.RawMessage             `json:"data"`
 		Messages []conversation.ModelMessage `json:"messages"`
 		Skills   []string                    `json:"skills"`
+		Usage    json.RawMessage             `json:"usage,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(data), &envelope); err == nil {
 		if (envelope.Type == "agent_end" || envelope.Type == "done") && len(envelope.Messages) > 0 {
-			return true, r.storeRound(ctx, req, envelope.Messages)
+			return true, r.storeRound(ctx, req, envelope.Messages, envelope.Usage)
 		}
 		if envelope.Type == "done" && len(envelope.Data) > 0 {
 			var resp gatewayResponse
 			if err := json.Unmarshal(envelope.Data, &resp); err == nil && len(resp.Messages) > 0 {
-				return true, r.storeRound(ctx, req, resp.Messages)
+				return true, r.storeRound(ctx, req, resp.Messages, resp.Usage)
 			}
 		}
 	}
@@ -578,7 +587,7 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 	// fallback: data: {messages: [...]}
 	var resp gatewayResponse
 	if err := json.Unmarshal([]byte(data), &resp); err == nil && len(resp.Messages) > 0 {
-		return true, r.storeRound(ctx, req, resp.Messages)
+		return true, r.storeRound(ctx, req, resp.Messages, resp.Usage)
 	}
 	return false, nil
 }
@@ -648,7 +657,12 @@ func (r *Resolver) resolveContainerID(ctx context.Context, botID, explicit strin
 
 // --- message loading ---
 
-func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMinutes int) ([]conversation.ModelMessage, error) {
+type messageWithUsage struct {
+	Message          conversation.ModelMessage
+	UsageInputTokens *int
+}
+
+func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMinutes int) ([]messageWithUsage, error) {
 	if r.messageService == nil {
 		return nil, nil
 	}
@@ -657,7 +671,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 	if err != nil {
 		return nil, err
 	}
-	var result []conversation.ModelMessage
+	var result []messageWithUsage
 	for _, m := range msgs {
 		var mm conversation.ModelMessage
 		if err := json.Unmarshal(m.Content, &mm); err != nil {
@@ -667,9 +681,82 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, maxContextMi
 		} else {
 			mm.Role = m.Role
 		}
-		result = append(result, mm)
+		var inputTokens *int
+		if len(m.Usage) > 0 {
+			var u gatewayUsage
+			if json.Unmarshal(m.Usage, &u) == nil {
+				inputTokens = u.InputTokens
+			}
+		}
+		result = append(result, messageWithUsage{Message: mm, UsageInputTokens: inputTokens})
 	}
 	return result, nil
+}
+
+func estimateMessageTokens(msg conversation.ModelMessage) int {
+	text := msg.TextContent()
+	if len(text) == 0 {
+		data, _ := json.Marshal(msg.Content)
+		return len(data) / 4
+	}
+	return len(text) / 4
+}
+
+func trimMessagesByTokens(messages []messageWithUsage, maxTokens int) []conversation.ModelMessage {
+	if maxTokens <= 0 || len(messages) == 0 {
+		result := make([]conversation.ModelMessage, len(messages))
+		for i, m := range messages {
+			result[i] = m.Message
+		}
+		return result
+	}
+
+	// Scan backwards. When a message with UsageInputTokens is found, that value
+	// represents the cumulative input tokens for all messages up to and including
+	// that message. Messages after it are estimated with chars/4.
+	totalTokens := 0
+	anchorFound := false
+	cutoff := 0
+
+	tailEstimate := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if !anchorFound && messages[i].UsageInputTokens != nil {
+			anchorFound = true
+			totalTokens = *messages[i].UsageInputTokens + tailEstimate
+			if totalTokens > maxTokens {
+				cutoff = i + 1
+				break
+			}
+			continue
+		}
+		est := estimateMessageTokens(messages[i].Message)
+		if anchorFound {
+			totalTokens += est
+			if totalTokens > maxTokens {
+				cutoff = i + 1
+				break
+			}
+		} else {
+			tailEstimate += est
+		}
+	}
+
+	if !anchorFound {
+		totalTokens = 0
+		for i := len(messages) - 1; i >= 0; i-- {
+			totalTokens += estimateMessageTokens(messages[i].Message)
+			if totalTokens > maxTokens {
+				cutoff = i + 1
+				break
+			}
+		}
+	}
+
+	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
+	for _, m := range messages[cutoff:] {
+		result = append(result, m.Message)
+	}
+	return result
 }
 
 type memoryContextItem struct {
@@ -792,9 +879,7 @@ func (r *Resolver) persistUserMessage(ctx context.Context, req conversation.Chat
 	return err
 }
 
-func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage) error {
-	// Add user query as the first message if not already present in the round.
-	// This ensures the user's prompt is persisted alongside the assistant's response.
+func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage) error {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages)+1)
 	hasUserQuery := false
 	for _, m := range messages {
@@ -813,7 +898,6 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 	}
 	for _, m := range messages {
 		if req.UserMessagePersisted && m.Role == "user" && strings.TrimSpace(m.TextContent()) == strings.TrimSpace(req.Query) {
-			// User message was already persisted before streaming; skip duplicate copy in round payload.
 			continue
 		}
 		fullRound = append(fullRound, m)
@@ -822,14 +906,12 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 		return nil
 	}
 
-	r.storeMessages(ctx, req, fullRound)
-	// Run memory extraction in the background so that the SSE stream can
-	// finish immediately after messages are persisted.
+	r.storeMessages(ctx, req, fullRound, usage)
 	go r.storeMemory(context.WithoutCancel(ctx), req.BotID, fullRound)
 	return nil
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, usage json.RawMessage) {
 	if r.messageService == nil {
 		return
 	}
@@ -838,7 +920,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	for _, msg := range messages {
+	for i, msg := range messages {
 		content, err := json.Marshal(msg)
 		if err != nil {
 			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
@@ -857,8 +939,11 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 			}
 		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
-			// Assistant/tool/system outputs are linked to the inbound source message for cross-channel reply threading.
 			sourceReplyToMessageID = req.ExternalMessageID
+		}
+		var msgUsage json.RawMessage
+		if i == len(messages)-1 && len(usage) > 0 {
+			msgUsage = usage
 		}
 		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
@@ -871,6 +956,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			Role:                    msg.Role,
 			Content:                 content,
 			Metadata:                meta,
+			Usage:                   msgUsage,
 			Assets:                  assets,
 		}); err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))

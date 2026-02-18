@@ -36,6 +36,7 @@ type Message struct {
 	Role                    string          `json:"role"`
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
+	Usage                   json.RawMessage `json:"usage,omitempty"`
 	Assets                  []MessageAsset  `json:"assets,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 }
@@ -59,6 +60,7 @@ type PersistInput struct {
 	Role                    string
 	Content                 json.RawMessage
 	Metadata                map[string]any
+	Usage                   json.RawMessage
 	Assets                  []AssetRef
 }
 
