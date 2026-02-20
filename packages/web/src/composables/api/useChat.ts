@@ -492,24 +492,35 @@ export function extractMessageText(message: Message): string {
   const raw = message.content
   if (!raw) return ''
 
+  let text: string
   if (typeof raw === 'string') {
     try {
       const parsed = JSON.parse(raw)
-      return extractTextFromContent(parsed?.content ?? parsed).trim()
+      text = extractTextFromContent(parsed?.content ?? parsed).trim()
     } catch {
-      return raw.trim()
+      text = raw.trim()
     }
-  }
-
-  if (typeof raw === 'object') {
+  } else if (typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
     if ('content' in obj && obj.content !== undefined && obj.content !== null) {
-      return extractTextFromContent(obj.content).trim()
+      text = extractTextFromContent(obj.content).trim()
+    } else {
+      text = extractTextFromContent(raw).trim()
     }
-    return extractTextFromContent(raw).trim()
+  } else {
+    text = extractTextFromContent(raw).trim()
   }
 
-  return extractTextFromContent(raw).trim()
+  if (message.role === 'user') {
+    text = stripYAMLHeader(text)
+  }
+  return text
+}
+
+const yamlHeaderRe = /^---\n[\s\S]*?\n---\n?/
+
+export function stripYAMLHeader(text: string): string {
+  return text.replace(yamlHeaderRe, '').trim()
 }
 
 export function extractTextFromContent(content: unknown): string {
