@@ -7648,6 +7648,10 @@
                         "type": "object",
                         "additionalProperties": {}
                     }
+                },
+                "usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },
@@ -7744,6 +7748,10 @@
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },
@@ -7756,6 +7764,10 @@
                         "type": "object",
                         "additionalProperties": {}
                     }
+                },
+                "usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },

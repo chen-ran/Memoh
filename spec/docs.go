@@ -7657,6 +7657,10 @@ const docTemplate = `{
                         "type": "object",
                         "additionalProperties": {}
                     }
+                },
+                "usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },
@@ -7753,6 +7757,10 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },
@@ -7765,6 +7773,10 @@ const docTemplate = `{
                         "type": "object",
                         "additionalProperties": {}
                     }
+                },
+                "usage": {
+                    "type": "object",
+                    "additionalProperties": {}
                 }
             }
         },

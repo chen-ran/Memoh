@@ -944,6 +944,9 @@ export type SubagentContextResponse = {
     messages?: Array<{
         [key: string]: unknown;
     }>;
+    usage?: {
+        [key: string]: unknown;
+    };
 };
 
 export type SubagentCreateRequest = {
@@ -982,12 +985,18 @@ export type SubagentSubagent = {
     name?: string;
     skills?: Array<string>;
     updated_at?: string;
+    usage?: {
+        [key: string]: unknown;
+    };
 };
 
 export type SubagentUpdateContextRequest = {
     messages?: Array<{
         [key: string]: unknown;
     }>;
+    usage?: {
+        [key: string]: unknown;
+    };
 };
 
 export type SubagentUpdateRequest = {
