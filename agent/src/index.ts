@@ -50,6 +50,7 @@ export const createAuthFetcher = (auth: AgentAuthContext): AuthFetcher => {
           auth.bearer = await refreshPromise
         } catch (e) {
           console.error('Token refresh failed', e)
+          throw e
         }
       }
     }
