@@ -128,6 +128,9 @@
         <TabsTrigger value="history">
           {{ $t('bots.tabs.history') }}
         </TabsTrigger>
+        <TabsTrigger value="skills">
+          {{ $t('bots.tabs.skills') }}
+        </TabsTrigger>
         <TabsTrigger value="settings">
           {{ $t('bots.tabs.settings') }}
         </TabsTrigger>
@@ -499,13 +502,19 @@
         value="subagents"
         class="mt-6"
       >
-        <!-- TODO: Subagents content -->
+        <BotSubagents :bot-id="botId" />
       </TabsContent>
       <TabsContent
         value="history"
         class="mt-6"
       >
-        <!-- TODO: History content -->
+        <BotHistory :bot-id="botId" />
+      </TabsContent>
+      <TabsContent
+        value="skills"
+        class="mt-6"
+      >
+        <BotSkills :bot-id="botId" />
       </TabsContent>
       <TabsContent
         value="settings"
@@ -614,6 +623,9 @@ import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
+import BotSkills from './components/bot-skills.vue'
+import BotHistory from './components/bot-history.vue'
+import BotSubagents from './components/bot-subagents.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'

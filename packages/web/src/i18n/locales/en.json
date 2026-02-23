@@ -308,6 +308,7 @@
       "mcp": "MCP",
       "subagents": "Subagents",
       "history": "History",
+      "skills": "Skills",
       "settings": "Settings"
     },
     "container": {
@@ -442,6 +443,64 @@
       "noConversations": "No history conversations found",
       "idCopied": "ID copied to clipboard",
       "deleteConfirm": "Are you sure you want to delete this memory? This cannot be undone."
+    },
+    "skills": {
+      "title": "Skills",
+      "addSkill": "New Skill",
+      "emptyTitle": "No Skills",
+      "emptyDescription": "Click above to create a new skill",
+      "description": "Description",
+      "descriptionPlaceholder": "Enter skill description",
+      "content": "Content",
+      "contentPlaceholder": "Enter skill content/prompt",
+      "deleteConfirm": "Are you sure you want to delete this skill?",
+      "deleteSuccess": "Skill deleted",
+      "deleteFailed": "Failed to delete skill",
+      "saveSuccess": "Skill saved",
+      "saveFailed": "Failed to save skill",
+      "loadFailed": "Failed to load skills"
+    },
+    "history": {
+      "title": "History",
+      "loadFailed": "Failed to load history",
+      "empty": "No history messages",
+      "loadMore": "Load More",
+      "messageCount": "{count} messages",
+      "selectAll": "Select all",
+      "deleteSelectedConfirm": "Are you sure you want to delete the selected {count} message(s)? This will clear all history and cannot be undone.",
+      "deleteSuccess": "Messages deleted",
+      "deleteFailed": "Failed to delete messages",
+      "role": {
+        "user": "User",
+        "assistant": "Assistant",
+        "tool": "Tool",
+        "system": "System"
+      },
+      "filter": "Filter by role",
+      "filterAll": "All",
+      "expandContent": "Expand",
+      "collapseContent": "Collapse"
+    },
+    "subagents": {
+      "title": "Subagents",
+      "subtitle": "Manage autonomous subagents for this bot.",
+      "add": "Create Subagent",
+      "emptyTitle": "No Subagents",
+      "emptyDescription": "Click above to create a subagent",
+      "description": "Description",
+      "descriptionPlaceholder": "Enter subagent description",
+      "deleteConfirm": "Are you sure you want to delete this subagent?",
+      "deleteSuccess": "Subagent deleted",
+      "deleteFailed": "Failed to delete subagent",
+      "saveSuccess": "Subagent saved",
+      "saveFailed": "Failed to save subagent",
+      "loadFailed": "Failed to load subagents",
+      "viewContext": "View Context",
+      "contextTitle": "Subagent Context",
+      "contextEmpty": "No context messages",
+      "messagesCount": "{count} messages",
+      "usage": "Usage",
+      "skills": "Skills"
     }
   }
 }

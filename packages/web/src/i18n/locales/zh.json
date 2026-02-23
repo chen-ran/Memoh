@@ -304,6 +304,7 @@
       "mcp": "MCP",
       "subagents": "子智能体",
       "history": "对话历史",
+      "skills": "技能",
       "settings": "设置"
     },
     "container": {
@@ -438,6 +439,64 @@
       "noConversations": "暂无历史对话",
       "idCopied": "ID 已复制",
       "deleteConfirm": "确定要删除这条记忆吗？此操作无法撤销。"
+    },
+    "skills": {
+      "title": "技能",
+      "addSkill": "新建技能",
+      "emptyTitle": "暂无技能",
+      "emptyDescription": "点击上方按钮创建新技能",
+      "description": "描述",
+      "descriptionPlaceholder": "输入技能描述",
+      "content": "内容",
+      "contentPlaceholder": "输入技能内容/提示词",
+      "deleteConfirm": "确定要删除这个技能吗？",
+      "deleteSuccess": "技能已删除",
+      "deleteFailed": "删除技能失败",
+      "saveSuccess": "技能已保存",
+      "saveFailed": "保存技能失败",
+      "loadFailed": "加载技能失败"
+    },
+    "history": {
+      "title": "对话历史",
+      "loadFailed": "加载历史消息失败",
+      "empty": "暂无历史消息",
+      "loadMore": "加载更多",
+      "messageCount": "{count} 条消息",
+      "selectAll": "全选",
+      "deleteSelectedConfirm": "确定要删除选中的 {count} 条消息吗？此操作将清空所有历史记录，且无法撤销。",
+      "deleteSuccess": "消息已删除",
+      "deleteFailed": "删除消息失败",
+      "role": {
+        "user": "用户",
+        "assistant": "助手",
+        "tool": "工具",
+        "system": "系统"
+      },
+      "filter": "按角色筛选",
+      "filterAll": "全部",
+      "expandContent": "展开",
+      "collapseContent": "收起"
+    },
+    "subagents": {
+      "title": "子智能体",
+      "subtitle": "管理当前 Bot 的自治子智能体。",
+      "add": "创建子智能体",
+      "emptyTitle": "暂无子智能体",
+      "emptyDescription": "点击上方按钮创建子智能体",
+      "description": "描述",
+      "descriptionPlaceholder": "输入子智能体描述",
+      "deleteConfirm": "确定要删除这个子智能体吗？",
+      "deleteSuccess": "子智能体已删除",
+      "deleteFailed": "删除子智能体失败",
+      "saveSuccess": "子智能体已保存",
+      "saveFailed": "保存子智能体失败",
+      "loadFailed": "加载子智能体失败",
+      "viewContext": "查看上下文",
+      "contextTitle": "子智能体上下文",
+      "contextEmpty": "暂无上下文消息",
+      "messagesCount": "{count} 条消息",
+      "usage": "用量",
+      "skills": "技能"
     }
   }
 }
