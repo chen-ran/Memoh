@@ -2474,6 +2474,48 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "description": "Clear all persisted bot-level history messages",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Delete all bot history messages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/bots/{bot_id}/schedule": {
@@ -8173,10 +8215,14 @@ const docTemplate = `{
         "searchproviders.ProviderName": {
             "type": "string",
             "enum": [
-                "brave"
+                "brave",
+                "bing",
+                "google"
             ],
             "x-enum-varnames": [
-                "ProviderBrave"
+                "ProviderBrave",
+                "ProviderBing",
+                "ProviderGoogle"
             ]
         },
         "searchproviders.UpdateRequest": {

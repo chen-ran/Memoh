@@ -954,7 +954,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google';
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -3001,6 +3001,42 @@ export type DeleteBotsByBotIdMemoryByIdResponses = {
 };
 
 export type DeleteBotsByBotIdMemoryByIdResponse = DeleteBotsByBotIdMemoryByIdResponses[keyof DeleteBotsByBotIdMemoryByIdResponses];
+
+export type DeleteBotsByBotIdMessagesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/messages';
+};
+
+export type DeleteBotsByBotIdMessagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdMessagesError = DeleteBotsByBotIdMessagesErrors[keyof DeleteBotsByBotIdMessagesErrors];
+
+export type DeleteBotsByBotIdMessagesResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type GetBotsByBotIdMessagesData = {
     body?: never;

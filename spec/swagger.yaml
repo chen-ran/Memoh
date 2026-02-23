@@ -1563,9 +1563,13 @@ definitions:
   searchproviders.ProviderName:
     enum:
     - brave
+    - bing
+    - google
     type: string
     x-enum-varnames:
     - ProviderBrave
+    - ProviderBing
+    - ProviderGoogle
   searchproviders.UpdateRequest:
     properties:
       config:
@@ -3347,6 +3351,34 @@ paths:
       tags:
       - memory
   /bots/{bot_id}/messages:
+    delete:
+      description: Clear all persisted bot-level history messages
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete all bot history messages
+      tags:
+      - messages
     get:
       description: List messages for a bot history with optional pagination
       parameters:
