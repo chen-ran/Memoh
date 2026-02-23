@@ -28,10 +28,12 @@ permissions:
   id-token: write
 
 jobs:
-  docker:
-    runs-on: ubuntu-latest
+  build:
     strategy:
+      fail-fast: false
       matrix:
+        image: [server, agent, web, mcp]
+        platform: [linux/amd64, linux/arm64]
         include:
           - image: server
             dockerfile: docker/Dockerfile.server
@@ -41,6 +43,11 @@ jobs:
             dockerfile: docker/Dockerfile.web
           - image: mcp
             dockerfile: docker/Dockerfile.mcp
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,25 +59,23 @@ jobs:
           images: |
             memohai/${{ matrix.image }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          tags: |
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' || (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) }}
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-          labels: |
-            org.opencontainers.image.title=memoh-${{ matrix.image }}
-            org.opencontainers.image.description=Memoh ${{ matrix.image }} - Multi-member AI agent platform
-            org.opencontainers.image.vendor=memohai
-
-      - name: Set up QEMU
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Create Go cache directory
+        run: mkdir -p .go-cache
+
+      - name: Set up Go
+        if: matrix.image == 'server' || matrix.image == 'mcp'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Pre-warm Go mod cache
+        if: matrix.image == 'server' || matrix.image == 'mcp'
+        run: GOMODCACHE=$(pwd)/.go-cache go mod download
 
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request'
@@ -87,22 +92,99 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          outputs: ${{ (github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')) && format('type=image,name=memohai/{0},name=ghcr.io/{1}/{0},push-by-digest=true,name-canonical=true,push=true', matrix.image, github.repository_owner) || 'type=image,push=false' }}
+          build-contexts: |
+            gomodcache=${{ github.workspace }}/.go-cache
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT_HASH=${{ github.sha }}
-            BUILD_TIME=${{ fromJson(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
             VITE_API_URL=/api
             VITE_AGENT_URL=/agent
-          provenance: ${{ startsWith(github.ref, 'refs/tags/') }}
-          sbom: ${{ startsWith(github.ref, 'refs/tags/') }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }},mode=max
+
+      - name: Export digest
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
+    needs: build
+    strategy:
+      matrix:
+        image: [server, agent, web, mcp]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            memohai/${{ matrix.image }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' || (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) }}
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          for image in memohai/${{ matrix.image }} ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}; do
+            # Filter tags for the current repository
+            TAG_ARGS=$(echo "${{ steps.meta.outputs.tags }}" | grep "^${image}:" | xargs -n1 printf " -t %s")
+            
+            if [ -n "$TAG_ARGS" ]; then
+              # Create manifest list with all digests
+              SOURCES=$(printf "${image}@sha256:%s " *)
+              
+              echo "Creating manifest for $image with tags: $TAG_ARGS"
+              docker buildx imagetools create $TAG_ARGS $SOURCES
+            fi
+          done
