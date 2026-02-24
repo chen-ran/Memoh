@@ -45,7 +45,6 @@ func TestRefreshTokenFromContext(t *testing.T) {
 	originalClaims, ok := token.Claims.(jwt.MapClaims)
 	assert.True(t, ok)
 	origIat := int64(originalClaims["iat"].(float64))
-	origExp := int64(originalClaims["exp"].(float64))
 
 	// Parse the new token
 	newToken, err := jwt.Parse(newTokenStr, func(token *jwt.Token) (interface{}, error) {
@@ -89,7 +88,7 @@ func TestRefreshTokenFromContext_MissingUser(t *testing.T) {
 	// Context without the "user" key
 	_, _, err := RefreshTokenFromContext(c, secret, defaultDuration)
 	assert.Error(t, err)
-	
+
 	httpErr, ok := err.(*echo.HTTPError)
 	assert.True(t, ok)
 	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)

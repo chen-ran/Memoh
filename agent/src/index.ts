@@ -5,7 +5,9 @@ import { errorMiddleware } from './middlewares/error'
 import { loadConfig, getBaseUrl as getBaseUrlByConfig } from '@memoh/config'
 import { AgentAuthContext, AuthFetcher } from '@memoh/agent'
 
-const config = loadConfig('../config.toml')
+const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
+const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../config.toml'
+const config = loadConfig(configPath)
 
 export const getBaseUrl = () => {
   return getBaseUrlByConfig(config)
