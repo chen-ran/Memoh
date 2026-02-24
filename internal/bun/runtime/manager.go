@@ -36,6 +36,8 @@ const (
 	defaultGatewayHost      = "127.0.0.1"
 	defaultGatewayPort      = 8081
 	agentConfigFileName     = "config.toml"
+	agentBinName            = "agent-bin"
+	agentUnavailableMarker  = "UNAVAILABLE"
 	healthCheckTimeout      = 30 * time.Second
 	healthCheckRetryBackoff = 400 * time.Millisecond
 	processStopTimeout      = 5 * time.Second
@@ -69,37 +71,32 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	bunFS, bunBinName, err := embedded.BunFS("", "")
-	if err != nil {
-		return err
-	}
 
 	agentDir := filepath.Join(workdir, "agent")
-	bunDir := filepath.Join(workdir, "bun")
 	if err := extractFS(agentFS, agentDir); err != nil {
 		return fmt.Errorf("extract agent assets: %w", err)
 	}
-	if err := extractFS(bunFS, bunDir); err != nil {
-		return fmt.Errorf("extract bun runtime: %w", err)
-	}
 
-	bunPath := filepath.Join(bunDir, bunBinName)
-	if _, err := os.Stat(bunPath); err != nil {
+	agentBinPath := filepath.Join(agentDir, agentBinaryNameForRuntime())
+	if _, err := os.Stat(agentBinPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			m.log.Warn("bundled bun runtime unavailable for current platform; falling back to configured agent gateway", slog.String("platform", runtimePlatform()))
-			return nil
+			markerPath := filepath.Join(agentDir, agentUnavailableMarker)
+			if _, markerErr := os.Stat(markerPath); markerErr == nil {
+				m.log.Warn("bundled agent binary unavailable for current platform; falling back to configured agent gateway", slog.String("platform", runtimePlatform()))
+				return nil
+			}
 		}
-		return err
+		return fmt.Errorf("agent binary missing: %w", err)
 	}
-	if err := os.Chmod(bunPath, 0o755); err != nil {
-		return fmt.Errorf("chmod bun binary: %w", err)
+	if err := os.Chmod(agentBinPath, 0o755); err != nil {
+		return fmt.Errorf("chmod agent binary: %w", err)
 	}
 	agentConfigPath := filepath.Join(agentDir, agentConfigFileName)
 	if err := writeAgentConfig(agentConfigPath, m.cfg); err != nil {
 		return err
 	}
 
-	cmd := exec.Command(bunPath, "run", "dist/index.js")
+	cmd := exec.Command(agentBinPath)
 	cmd.Dir = agentDir
 	cmd.Env = append(
 		os.Environ(),
@@ -252,4 +249,11 @@ func trimTrailingNewline(s string) string {
 
 func runtimePlatform() string {
 	return fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
+func agentBinaryNameForRuntime() string {
+	if runtime.GOOS == "windows" {
+		return agentBinName + ".exe"
+	}
+	return agentBinName
 }

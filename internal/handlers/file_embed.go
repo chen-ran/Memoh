@@ -52,21 +52,12 @@ func (h *EmbeddedWebHandler) Register(e *echo.Echo) {
 }
 
 func (h *EmbeddedWebHandler) serveIndex(c echo.Context) error {
-	content, err := fs.ReadFile(h.webFS, "index.html")
-	if err != nil {
-		h.log.Error("read embedded index.html failed", slog.Any("error", err))
-		return echo.ErrNotFound
-	}
-	return c.Blob(http.StatusOK, "text/html; charset=utf-8", content)
+	return h.serveKnownGzip(c, "index.html", "text/html; charset=utf-8")
 }
 
 func (h *EmbeddedWebHandler) serveStatic(targetPath, contentType string) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		content, err := fs.ReadFile(h.webFS, targetPath)
-		if err != nil {
-			return echo.ErrNotFound
-		}
-		return c.Blob(http.StatusOK, contentType, content)
+		return h.serveKnownGzip(c, targetPath, contentType)
 	}
 }
 
@@ -77,15 +68,33 @@ func (h *EmbeddedWebHandler) serveAsset(c echo.Context) error {
 	}
 
 	fullPath := path.Join("assets", assetPath)
-	content, err := fs.ReadFile(h.webFS, fullPath)
-	if err != nil {
-		return echo.ErrNotFound
-	}
-
 	contentType := mime.TypeByExtension(filepath.Ext(assetPath))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	gzipPath := fullPath + ".gz"
+	content, err := fs.ReadFile(h.webFS, gzipPath)
+	if err != nil {
+		return echo.ErrNotFound
+	}
+	header := c.Response().Header()
+	header.Set(echo.HeaderContentEncoding, "gzip")
+	header.Set(echo.HeaderVary, "Accept-Encoding")
+	return c.Blob(http.StatusOK, contentType, content)
+}
+
+func (h *EmbeddedWebHandler) serveKnownGzip(c echo.Context, targetPath, contentType string) error {
+	gzipPath := targetPath + ".gz"
+	content, err := fs.ReadFile(h.webFS, gzipPath)
+	if err != nil {
+		if targetPath == "index.html" {
+			h.log.Error("read embedded index.html.gz failed", slog.Any("error", err))
+		}
+		return echo.ErrNotFound
+	}
+	header := c.Response().Header()
+	header.Set(echo.HeaderContentEncoding, "gzip")
+	header.Set(echo.HeaderVary, "Accept-Encoding")
 	return c.Blob(http.StatusOK, contentType, content)
 }
 

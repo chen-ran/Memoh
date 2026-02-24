@@ -4,126 +4,201 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_OS="${TARGET_OS:-$(go env GOOS)}"
 TARGET_ARCH="${TARGET_ARCH:-$(go env GOARCH)}"
-BUN_VERSION="${BUN_VERSION:-latest}"
 VERSION="${VERSION:-dev}"
 COMMIT_HASH="${COMMIT_HASH:-unknown}"
 BUILD_TIME="${BUILD_TIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist}"
 PREPARE_ASSETS_ONLY="false"
+UPX_COMPRESS_AGENT_BIN="${UPX_COMPRESS_AGENT_BIN:-false}"
+UPX_ARGS="${UPX_ARGS:--3}"
+UPX_ALLOW_DARWIN="${UPX_ALLOW_DARWIN:-false}"
+AUTO_INSTALL_UPX="${AUTO_INSTALL_UPX:-}"
+if [[ -z "$AUTO_INSTALL_UPX" ]]; then
+  AUTO_INSTALL_UPX=$([[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "true" || echo "false")
+fi
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --os)
-      TARGET_OS="$2"
-      shift 2
-      ;;
-    --arch)
-      TARGET_ARCH="$2"
-      shift 2
-      ;;
-    --bun-version)
-      BUN_VERSION="$2"
-      shift 2
-      ;;
-    --version)
-      VERSION="$2"
-      shift 2
-      ;;
-    --commit-hash)
-      COMMIT_HASH="$2"
-      shift 2
-      ;;
-    --output-dir)
-      OUTPUT_DIR="$2"
-      shift 2
-      ;;
-    --prepare-assets)
-      PREPARE_ASSETS_ONLY="true"
-      shift
-      ;;
-    *)
-      echo "Unknown arg: $1" >&2
-      exit 1
-      ;;
+WEB_DIR="$ROOT_DIR/internal/embedded/web"
+AGENT_DIR="$ROOT_DIR/internal/embedded/agent"
+BUN_DIR="$ROOT_DIR/internal/embedded/bun"
+
+log() {
+  echo "[release] $*"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/release.sh [options]
+
+Options:
+  --os <os>             Target OS (default: current GOOS)
+  --arch <arch>         Target ARCH (default: current GOARCH)
+  --version <version>   Version string injected into memoh binary
+  --commit-hash <sha>   Commit hash injected into memoh binary
+  --output-dir <dir>    Output directory for release artifacts
+  --prepare-assets      Only prepare embedded assets, do not build archive
+
+Compatibility options:
+  --bun-version <v>     Deprecated; ignored (kept for backward compatibility)
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --os)
+        TARGET_OS="$2"
+        shift 2
+        ;;
+      --arch)
+        TARGET_ARCH="$2"
+        shift 2
+        ;;
+      --bun-version)
+        # Bun runtime archives are no longer embedded; keep arg for compatibility.
+        shift 2
+        ;;
+      --version)
+        VERSION="$2"
+        shift 2
+        ;;
+      --commit-hash)
+        COMMIT_HASH="$2"
+        shift 2
+        ;;
+      --output-dir)
+        OUTPUT_DIR="$2"
+        shift 2
+        ;;
+      --prepare-assets)
+        PREPARE_ASSETS_ONLY="true"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown arg: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+}
+
+write_keep_gitignore() {
+  local dir="$1"
+  printf "*\n!.gitignore\n" > "$dir/.gitignore"
+}
+
+resolve_agent_compile_target() {
+  case "${TARGET_OS}-${TARGET_ARCH}" in
+    linux-amd64) echo "bun-linux-x64|agent-bin" ;;
+    linux-arm64) echo "bun-linux-arm64|agent-bin" ;;
+    darwin-amd64) echo "bun-darwin-x64|agent-bin" ;;
+    darwin-arm64) echo "bun-darwin-arm64|agent-bin" ;;
+    windows-amd64) echo "bun-windows-x64|agent-bin.exe" ;;
+    *) echo "|" ;;
   esac
-done
+}
+
+prepare_embed_dirs() {
+  rm -rf "$WEB_DIR" "$AGENT_DIR" "$BUN_DIR"
+  mkdir -p "$WEB_DIR" "$AGENT_DIR" "$BUN_DIR"
+  write_keep_gitignore "$WEB_DIR"
+  write_keep_gitignore "$AGENT_DIR"
+  write_keep_gitignore "$BUN_DIR"
+}
 
 prepare_assets() {
-  local web_dir="$ROOT_DIR/internal/embedded/web"
-  local agent_dir="$ROOT_DIR/internal/embedded/agent"
-  local bun_dir="$ROOT_DIR/internal/embedded/bun/${TARGET_OS}-${TARGET_ARCH}"
+  prepare_embed_dirs
 
-  rm -rf "$web_dir" "$agent_dir" "$bun_dir"
-  mkdir -p "$web_dir" "$agent_dir" "$bun_dir"
-
-  echo "[release] building web assets"
+  log "building web assets"
   pnpm --dir "$ROOT_DIR" web:build
-  cp -R "$ROOT_DIR/packages/web/dist/." "$web_dir/"
+  cp -R "$ROOT_DIR/packages/web/dist/." "$WEB_DIR/"
+  gzip_embedded_web_assets "$WEB_DIR"
 
-  echo "[release] building agent bundle"
-  pnpm --dir "$ROOT_DIR" agent:build
-  mkdir -p "$agent_dir/dist"
-  cp "$ROOT_DIR/agent/dist/index.js" "$agent_dir/dist/index.js"
-  if [[ -f "$ROOT_DIR/agent/package.json" ]]; then
-    cp "$ROOT_DIR/agent/package.json" "$agent_dir/package.json"
+  local target_key="${TARGET_OS}-${TARGET_ARCH}"
+  local resolved bun_compile_target agent_bin_name
+  resolved="$(resolve_agent_compile_target)"
+  bun_compile_target="${resolved%%|*}"
+  agent_bin_name="${resolved##*|}"
+  if [[ -z "$bun_compile_target" || -z "$agent_bin_name" ]]; then
+    echo "agent-bin not available for ${target_key}" > "$AGENT_DIR/UNAVAILABLE"
+    log "skipped agent-bin compile for unsupported target ${target_key}"
+    return 0
   fi
 
-  local bun_target=""
-  case "${TARGET_OS}-${TARGET_ARCH}" in
-    linux-amd64) bun_target="bun-linux-x64.zip" ;;
-    linux-arm64) bun_target="bun-linux-aarch64.zip" ;;
-    darwin-amd64) bun_target="bun-darwin-x64.zip" ;;
-    darwin-arm64) bun_target="bun-darwin-aarch64.zip" ;;
-    windows-amd64) bun_target="bun-windows-x64.zip" ;;
-    windows-arm64) bun_target="bun-windows-aarch64.zip" ;;
-    *)
-      echo "bun runtime not available for ${TARGET_OS}-${TARGET_ARCH}" > "$bun_dir/UNAVAILABLE"
-      echo "[release] skipped bun bundle for unsupported target ${TARGET_OS}-${TARGET_ARCH}"
-      return 0
-      ;;
-  esac
+  log "building agent executable (${bun_compile_target})"
+  (
+    cd "$ROOT_DIR/agent"
+    bun build src/index.ts --compile --target "$bun_compile_target" --outfile "$AGENT_DIR/$agent_bin_name"
+  )
+  chmod +x "$AGENT_DIR/$agent_bin_name" || true
+  compress_agent_bin_if_enabled "$AGENT_DIR/$agent_bin_name" "$TARGET_OS"
 
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' RETURN
+  log "embedded assets prepared (${target_key})"
+}
 
-  local url
-  if [[ "$BUN_VERSION" == "latest" ]]; then
-    url="https://github.com/oven-sh/bun/releases/latest/download/${bun_target}"
-  else
-    url="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${bun_target}"
+compress_agent_bin_if_enabled() {
+  local bin_path="$1"
+  local target_os="$2"
+
+  if [[ "$UPX_COMPRESS_AGENT_BIN" != "true" ]]; then
+    return 0
+  fi
+  ensure_upx_available
+  if [[ "$target_os" == "darwin" && "$UPX_ALLOW_DARWIN" != "true" ]]; then
+    log "skip upx on darwin (set UPX_ALLOW_DARWIN=true to force)"
+    return 0
   fi
 
-  echo "[release] downloading ${url}"
-  curl -fsSL "$url" -o "$tmp_dir/bun.zip"
-  unzip -q -o "$tmp_dir/bun.zip" -d "$tmp_dir"
+  local before_bytes after_bytes
+  before_bytes="$(wc -c < "$bin_path" | tr -d ' ')"
+  read -r -a upx_flags <<< "$UPX_ARGS"
+  upx "${upx_flags[@]}" "$bin_path"
+  after_bytes="$(wc -c < "$bin_path" | tr -d ' ')"
+  log "upx compressed agent-bin: ${before_bytes} -> ${after_bytes} bytes"
+}
 
-  local bun_bin_name="bun"
-  if [[ "$TARGET_OS" == "windows" ]]; then
-    bun_bin_name="bun.exe"
+ensure_upx_available() {
+  if command -v upx >/dev/null 2>&1; then
+    return 0
   fi
-
-  local bun_source_path=""
-  if [[ -f "$tmp_dir/${bun_target%.zip}/${bun_bin_name}" ]]; then
-    bun_source_path="$tmp_dir/${bun_target%.zip}/${bun_bin_name}"
-  else
-    for candidate in "$tmp_dir"/bun-"${TARGET_OS}"-*/"${bun_bin_name}"; do
-      if [[ -f "$candidate" ]]; then
-        bun_source_path="$candidate"
-        break
-      fi
-    done
-  fi
-
-  if [[ -z "$bun_source_path" ]]; then
-    echo "failed to locate bun binary in downloaded archive" >&2
+  if [[ "$AUTO_INSTALL_UPX" != "true" ]]; then
+    echo "[release] UPX_COMPRESS_AGENT_BIN=true but upx not found in PATH" >&2
+    echo "[release] install upx or set AUTO_INSTALL_UPX=true" >&2
     exit 1
   fi
 
-  cp "$bun_source_path" "$bun_dir/$bun_bin_name"
-  chmod +x "$bun_dir/$bun_bin_name" || true
+  log "upx not found; attempting auto-install"
+  if [[ "$OSTYPE" == linux* ]] && command -v apt-get >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get update -y && sudo apt-get install -y upx-ucl
+    else
+      apt-get update -y && apt-get install -y upx-ucl
+    fi
+  elif [[ "$OSTYPE" == darwin* ]] && command -v brew >/dev/null 2>&1; then
+    brew install upx
+  fi
 
-  echo "[release] embedded assets prepared (${TARGET_OS}-${TARGET_ARCH})"
+  if ! command -v upx >/dev/null 2>&1; then
+    echo "[release] failed to auto-install upx" >&2
+    exit 1
+  fi
+}
+
+gzip_embedded_web_assets() {
+  local web_dir="$1"
+  log "precompressing web assets (.gz)"
+
+  while IFS= read -r -d '' file_path; do
+    if [[ "$(basename "$file_path")" == ".gitignore" ]]; then
+      continue
+    fi
+    gzip -9 -c "$file_path" > "${file_path}.gz"
+    rm -f "$file_path"
+  done < <(find "$web_dir" -type f -print0)
 }
 
 build_archive() {
@@ -138,7 +213,7 @@ build_archive() {
   local target_dir="$OUTPUT_DIR/memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
   mkdir -p "$target_dir"
 
-  echo "[release] building binary ${TARGET_OS}/${TARGET_ARCH}"
+  log "building binary ${TARGET_OS}/${TARGET_ARCH}"
   CGO_ENABLED=0 GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
     go build \
     -trimpath \
@@ -152,12 +227,13 @@ build_archive() {
     tar -C "$OUTPUT_DIR" -czf "$OUTPUT_DIR/memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}.tar.gz" "memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
   fi
 
-  echo "[release] archive created (${TARGET_OS}-${TARGET_ARCH})"
+  log "archive created (${TARGET_OS}-${TARGET_ARCH})"
 }
 
+parse_args "$@"
 prepare_assets
 if [[ "$PREPARE_ASSETS_ONLY" == "true" ]]; then
-  echo "[release] prepare-assets only mode completed"
+  log "prepare-assets only mode completed"
   exit 0
 fi
 
