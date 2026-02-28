@@ -330,7 +330,7 @@ onMounted(() => {
     <div class="flex flex-1 min-h-0 overflow-hidden">
       <!-- File list -->
       <div
-        class="overflow-auto border-border transition-all"
+        class="overflow-auto border-border transition-colors"
         :class="openFile ? 'w-80 shrink-0 border-r' : 'w-full'"
       >
         <FileList
