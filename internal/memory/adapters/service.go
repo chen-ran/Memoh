@@ -37,16 +37,16 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 			DisplayName: "Built-in",
 			ConfigSchema: ProviderConfigSchema{
 				Fields: map[string]ProviderFieldSchema{
-					"memory_model_id": {
-						Type:        "model_select",
-						Title:       "Memory Model",
-						Description: "LLM model used for memory extraction and decision",
+					"memory_mode": {
+						Type:        "select",
+						Title:       "Memory Mode",
+						Description: "off = file-based, sparse = Qdrant sparse vectors, dense = mem0 SDK",
 						Required:    false,
 					},
 					"embedding_model_id": {
 						Type:        "model_select",
 						Title:       "Embedding Model",
-						Description: "Embedding model for dense vector search",
+						Description: "Embedding model for dense vector search (dense mode only)",
 						Required:    false,
 					},
 				},

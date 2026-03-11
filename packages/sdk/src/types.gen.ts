@@ -52,6 +52,130 @@ export type AccountsUpdateProfileRequest = {
     display_name?: string;
 };
 
+export type AdaptersCdfPoint = {
+    /**
+     * cumulative weight fraction [0.0, 1.0]
+     */
+    cumulative?: number;
+    /**
+     * rank position (1-based, sorted by value desc)
+     */
+    k?: number;
+};
+
+export type AdaptersCompactResult = {
+    after_count?: number;
+    before_count?: number;
+    ratio?: number;
+    results?: Array<AdaptersMemoryItem>;
+};
+
+export type AdaptersDeleteResponse = {
+    message?: string;
+};
+
+export type AdaptersMemoryItem = {
+    agent_id?: string;
+    bot_id?: string;
+    cdf_curve?: Array<AdaptersCdfPoint>;
+    created_at?: string;
+    hash?: string;
+    id?: string;
+    memory?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    run_id?: string;
+    score?: number;
+    top_k_buckets?: Array<AdaptersTopKBucket>;
+    updated_at?: string;
+};
+
+export type AdaptersMessage = {
+    content?: string;
+    role?: string;
+};
+
+export type AdaptersProviderConfigSchema = {
+    fields?: {
+        [key: string]: AdaptersProviderFieldSchema;
+    };
+};
+
+export type AdaptersProviderCreateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: AdaptersProviderType;
+};
+
+export type AdaptersProviderFieldSchema = {
+    description?: string;
+    example?: unknown;
+    required?: boolean;
+    secret?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type AdaptersProviderGetResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    is_default?: boolean;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type AdaptersProviderMeta = {
+    config_schema?: AdaptersProviderConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking';
+
+export type AdaptersProviderUpdateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
+export type AdaptersRebuildResult = {
+    fs_count?: number;
+    missing_count?: number;
+    restored_count?: number;
+    storage_count?: number;
+};
+
+export type AdaptersSearchResponse = {
+    relations?: Array<unknown>;
+    results?: Array<AdaptersMemoryItem>;
+};
+
+export type AdaptersTopKBucket = {
+    /**
+     * sparse dimension index (term hash)
+     */
+    index?: number;
+    /**
+     * weight (term frequency)
+     */
+    value?: number;
+};
+
+export type AdaptersUsageResponse = {
+    avg_text_bytes?: number;
+    count?: number;
+    estimated_storage_bytes?: number;
+    total_text_bytes?: number;
+};
+
 export type BotsBot = {
     allow_guest?: boolean;
     avatar_url?: string;
@@ -707,7 +831,7 @@ export type HandlersMemoryAddPayload = {
     };
     infer?: boolean;
     message?: string;
-    messages?: Array<ProviderMessage>;
+    messages?: Array<AdaptersMessage>;
     metadata?: {
         [key: string]: unknown;
     };
@@ -981,129 +1105,6 @@ export type ModelsUpdateRequest = {
     name?: string;
     supports_reasoning?: boolean;
     type?: ModelsModelType;
-};
-
-export type ProviderCdfPoint = {
-    /**
-     * cumulative weight fraction [0.0, 1.0]
-     */
-    cumulative?: number;
-    /**
-     * rank position (1-based, sorted by value desc)
-     */
-    k?: number;
-};
-
-export type ProviderCompactResult = {
-    after_count?: number;
-    before_count?: number;
-    ratio?: number;
-    results?: Array<ProviderMemoryItem>;
-};
-
-export type ProviderDeleteResponse = {
-    message?: string;
-};
-
-export type ProviderMemoryItem = {
-    agent_id?: string;
-    bot_id?: string;
-    cdf_curve?: Array<ProviderCdfPoint>;
-    created_at?: string;
-    hash?: string;
-    id?: string;
-    memory?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    run_id?: string;
-    score?: number;
-    top_k_buckets?: Array<ProviderTopKBucket>;
-    updated_at?: string;
-};
-
-export type ProviderMessage = {
-    content?: string;
-    role?: string;
-};
-
-export type ProviderProviderConfigSchema = {
-    fields?: {
-        [key: string]: ProviderProviderFieldSchema;
-    };
-};
-
-export type ProviderProviderCreateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-    provider?: ProviderProviderType;
-};
-
-export type ProviderProviderFieldSchema = {
-    description?: string;
-    example?: unknown;
-    required?: boolean;
-    title?: string;
-    type?: string;
-};
-
-export type ProviderProviderGetResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    is_default?: boolean;
-    name?: string;
-    provider?: string;
-    updated_at?: string;
-};
-
-export type ProviderProviderMeta = {
-    config_schema?: ProviderProviderConfigSchema;
-    display_name?: string;
-    provider?: string;
-};
-
-export type ProviderProviderType = 'builtin';
-
-export type ProviderProviderUpdateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-};
-
-export type ProviderRebuildResult = {
-    fs_count?: number;
-    missing_count?: number;
-    qdrant_count?: number;
-    restored_count?: number;
-};
-
-export type ProviderSearchResponse = {
-    relations?: Array<unknown>;
-    results?: Array<ProviderMemoryItem>;
-};
-
-export type ProviderTopKBucket = {
-    /**
-     * sparse dimension index (term hash)
-     */
-    index?: number;
-    /**
-     * weight (term frequency)
-     */
-    value?: number;
-};
-
-export type ProviderUsageResponse = {
-    avg_text_bytes?: number;
-    count?: number;
-    estimated_storage_bytes?: number;
-    total_text_bytes?: number;
 };
 
 export type ProvidersCountResponse = {
@@ -3756,7 +3757,7 @@ export type DeleteBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: ProviderDeleteResponse;
+    200: AdaptersDeleteResponse;
 };
 
 export type DeleteBotsByBotIdMemoryResponse = DeleteBotsByBotIdMemoryResponses[keyof DeleteBotsByBotIdMemoryResponses];
@@ -3803,7 +3804,7 @@ export type GetBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: ProviderSearchResponse;
+    200: AdaptersSearchResponse;
 };
 
 export type GetBotsByBotIdMemoryResponse = GetBotsByBotIdMemoryResponses[keyof GetBotsByBotIdMemoryResponses];
@@ -3848,7 +3849,7 @@ export type PostBotsByBotIdMemoryResponses = {
     /**
      * OK
      */
-    200: ProviderSearchResponse;
+    200: AdaptersSearchResponse;
 };
 
 export type PostBotsByBotIdMemoryResponse = PostBotsByBotIdMemoryResponses[keyof PostBotsByBotIdMemoryResponses];
@@ -3893,7 +3894,7 @@ export type PostBotsByBotIdMemoryCompactResponses = {
     /**
      * OK
      */
-    200: ProviderCompactResult;
+    200: AdaptersCompactResult;
 };
 
 export type PostBotsByBotIdMemoryCompactResponse = PostBotsByBotIdMemoryCompactResponses[keyof PostBotsByBotIdMemoryCompactResponses];
@@ -3935,7 +3936,7 @@ export type PostBotsByBotIdMemoryRebuildResponses = {
     /**
      * OK
      */
-    200: ProviderRebuildResult;
+    200: AdaptersRebuildResult;
 };
 
 export type PostBotsByBotIdMemoryRebuildResponse = PostBotsByBotIdMemoryRebuildResponses[keyof PostBotsByBotIdMemoryRebuildResponses];
@@ -3984,7 +3985,7 @@ export type PostBotsByBotIdMemorySearchResponses = {
     /**
      * OK
      */
-    200: ProviderSearchResponse;
+    200: AdaptersSearchResponse;
 };
 
 export type PostBotsByBotIdMemorySearchResponse = PostBotsByBotIdMemorySearchResponses[keyof PostBotsByBotIdMemorySearchResponses];
@@ -4026,7 +4027,7 @@ export type GetBotsByBotIdMemoryUsageResponses = {
     /**
      * OK
      */
-    200: ProviderUsageResponse;
+    200: AdaptersUsageResponse;
 };
 
 export type GetBotsByBotIdMemoryUsageResponse = GetBotsByBotIdMemoryUsageResponses[keyof GetBotsByBotIdMemoryUsageResponses];
@@ -4072,7 +4073,7 @@ export type DeleteBotsByBotIdMemoryByIdResponses = {
     /**
      * OK
      */
-    200: ProviderDeleteResponse;
+    200: AdaptersDeleteResponse;
 };
 
 export type DeleteBotsByBotIdMemoryByIdResponse = DeleteBotsByBotIdMemoryByIdResponses[keyof DeleteBotsByBotIdMemoryByIdResponses];
@@ -6260,7 +6261,7 @@ export type GetMemoryProvidersResponses = {
     /**
      * OK
      */
-    200: Array<ProviderProviderGetResponse>;
+    200: Array<AdaptersProviderGetResponse>;
 };
 
 export type GetMemoryProvidersResponse = GetMemoryProvidersResponses[keyof GetMemoryProvidersResponses];
@@ -6269,7 +6270,7 @@ export type PostMemoryProvidersData = {
     /**
      * Memory provider configuration
      */
-    body: ProviderProviderCreateRequest;
+    body: AdaptersProviderCreateRequest;
     path?: never;
     query?: never;
     url: '/memory-providers';
@@ -6292,7 +6293,7 @@ export type PostMemoryProvidersResponses = {
     /**
      * Created
      */
-    201: ProviderProviderGetResponse;
+    201: AdaptersProviderGetResponse;
 };
 
 export type PostMemoryProvidersResponse = PostMemoryProvidersResponses[keyof PostMemoryProvidersResponses];
@@ -6308,7 +6309,7 @@ export type GetMemoryProvidersMetaResponses = {
     /**
      * OK
      */
-    200: Array<ProviderProviderMeta>;
+    200: Array<AdaptersProviderMeta>;
 };
 
 export type GetMemoryProvidersMetaResponse = GetMemoryProvidersMetaResponses[keyof GetMemoryProvidersMetaResponses];
@@ -6374,7 +6375,7 @@ export type GetMemoryProvidersByIdResponses = {
     /**
      * OK
      */
-    200: ProviderProviderGetResponse;
+    200: AdaptersProviderGetResponse;
 };
 
 export type GetMemoryProvidersByIdResponse = GetMemoryProvidersByIdResponses[keyof GetMemoryProvidersByIdResponses];
@@ -6383,7 +6384,7 @@ export type PutMemoryProvidersByIdData = {
     /**
      * Updated configuration
      */
-    body: ProviderProviderUpdateRequest;
+    body: AdaptersProviderUpdateRequest;
     path: {
         /**
          * Provider ID
@@ -6411,7 +6412,7 @@ export type PutMemoryProvidersByIdResponses = {
     /**
      * OK
      */
-    200: ProviderProviderGetResponse;
+    200: AdaptersProviderGetResponse;
 };
 
 export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];

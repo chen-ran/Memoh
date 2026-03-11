@@ -30,3 +30,13 @@ services:
       args:
         - VITE_API_URL=${VITE_API_URL:-/api}
         - VITE_AGENT_URL=${VITE_AGENT_URL:-/agent}
+
+  sparse:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.sparse
+
+  browser:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.browser

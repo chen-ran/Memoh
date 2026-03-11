@@ -20,6 +20,14 @@
         :providers="memoryProviders"
         :placeholder="$t('bots.settings.memoryProviderPlaceholder')"
       />
+      <div
+        v-if="selectedBuiltinMemoryProvider"
+        class="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground"
+      >
+        {{ $t('bots.settings.memoryModePreview', {
+          mode: $t(`memoryProvider.modeNames.${selectedBuiltinMemoryMode}`),
+        }) }}
+      </div>
     </div>
 
     <!-- Search Provider -->
@@ -297,6 +305,15 @@ const providers = computed(() => providerData.value ?? [])
 const searchProviders = computed(() => searchProviderData.value ?? [])
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const browserContexts = computed(() => browserContextData.value ?? [])
+const selectedMemoryProvider = computed(() =>
+  memoryProviders.value.find((provider) => provider.id === form.memory_provider_id),
+)
+const selectedBuiltinMemoryProvider = computed(() =>
+  selectedMemoryProvider.value?.provider === 'builtin' ? selectedMemoryProvider.value : null,
+)
+const selectedBuiltinMemoryMode = computed(() =>
+  (selectedBuiltinMemoryProvider.value?.config as Record<string, string> | undefined)?.memory_mode || 'off',
+)
 
 const chatModelSupportsReasoning = computed(() => {
   if (!form.chat_model_id) return false

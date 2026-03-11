@@ -46,30 +46,111 @@
     <!-- Builtin Config (model selectors) -->
     <template v-if="curProvider.provider === 'builtin'">
       <div class="space-y-2">
-        <Label>{{ $t('memoryProvider.memoryModel') }}</Label>
+        <Label>{{ $t('memoryProvider.builtinMode') }}</Label>
         <p class="text-xs text-muted-foreground">
-          {{ $t('memoryProvider.memoryModelDescription') }}
+          {{ $t('memoryProvider.builtinModeDescription') }}
         </p>
-        <ModelSelect
-          v-model="configForm.memory_model_id"
-          :models="models"
-          :providers="providers"
-          model-type="chat"
-          :placeholder="$t('memoryProvider.memoryModel')"
-        />
+        <div class="inline-flex rounded-xl border border-border bg-muted/70 p-1">
+          <div class="relative grid grid-cols-3">
+            <div
+              class="absolute inset-y-0 left-0 w-1/3 rounded-lg bg-card shadow-sm ring-1 ring-border/60 transition-transform duration-200 ease-out"
+              :class="builtinModeHighlightClass"
+            />
+            <button
+              type="button"
+              class="relative z-10 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
+              :class="builtinModeButtonClass('off')"
+              @click="handleBuiltinModeChange('off')"
+            >
+              {{ $t('memoryProvider.modeNames.off') }}
+            </button>
+            <button
+              type="button"
+              class="relative z-10 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
+              :class="builtinModeButtonClass('sparse')"
+              @click="handleBuiltinModeChange('sparse')"
+            >
+              {{ $t('memoryProvider.modeNames.sparse') }}
+            </button>
+            <button
+              type="button"
+              class="relative z-10 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
+              :class="builtinModeButtonClass('dense')"
+              @click="handleBuiltinModeChange('dense')"
+            >
+              {{ $t('memoryProvider.modeNames.dense') }}
+            </button>
+          </div>
+        </div>
       </div>
-      <div class="space-y-2">
-        <Label>{{ $t('memoryProvider.embeddingModel') }}</Label>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('memoryProvider.embeddingModelDescription') }}
+
+      <div
+        v-if="builtinMode === 'off'"
+        class="rounded-lg border border-border bg-card p-4 space-y-2"
+      >
+        <h4 class="text-sm font-medium">
+          {{ $t('memoryProvider.modeNames.off') }}
+        </h4>
+        <p class="text-sm text-muted-foreground">
+          {{ $t('memoryProvider.modeDescriptions.off') }}
         </p>
-        <ModelSelect
-          v-model="configForm.embedding_model_id"
-          :models="models"
-          :providers="providers"
-          model-type="embedding"
-          :placeholder="$t('memoryProvider.embeddingModel')"
-        />
+      </div>
+
+      <div
+        v-if="builtinMode === 'sparse'"
+        class="rounded-lg border border-border bg-card p-4 space-y-4"
+      >
+        <div class="space-y-1">
+          <h4 class="text-sm font-medium">
+            {{ $t('memoryProvider.sparseSectionTitle') }}
+          </h4>
+          <p class="text-sm text-muted-foreground">
+            {{ $t('memoryProvider.modeDescriptions.sparse') }}
+          </p>
+        </div>
+
+        <div class="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+          {{ $t('memoryProvider.sparseInstallHint') }}
+        </div>
+      </div>
+
+      <div
+        v-if="builtinMode === 'dense'"
+        class="rounded-lg border border-border bg-card p-4 space-y-4"
+      >
+        <div class="space-y-1">
+          <h4 class="text-sm font-medium">
+            {{ $t('memoryProvider.denseSectionTitle') }}
+          </h4>
+          <p class="text-sm text-muted-foreground">
+            {{ $t('memoryProvider.modeDescriptions.dense') }}
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label>{{ $t('memoryProvider.denseBackend') }}</Label>
+          <div class="rounded-md border border-border bg-background px-3 py-2 text-sm">
+            {{ $t('memoryProvider.denseBackendValue') }}
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <Label>{{ $t('memoryProvider.denseEmbeddingModel') }}</Label>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('memoryProvider.denseEmbeddingModelDescription') }}
+          </p>
+          <ModelSelect
+            v-model="configForm.embedding_model_id"
+            :models="models"
+            :providers="providers"
+            model-type="embedding"
+            :placeholder="$t('memoryProvider.denseEmbeddingModel')"
+          />
+        </div>
+
+        <div class="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+          {{ $t('memoryProvider.denseQdrantHint') }}
+        </div>
       </div>
     </template>
 
@@ -118,7 +199,13 @@
 
 <script setup lang="ts">
 import { inject, ref, reactive, watch, computed, type Ref } from 'vue'
-import { Button, Input, Label, Separator, Spinner } from '@memoh/ui'
+import {
+  Button,
+  Input,
+  Label,
+  Separator,
+  Spinner,
+} from '@memoh/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProvidersMeta, putMemoryProvidersById, deleteMemoryProvidersById } from '@memoh/sdk'
 import { toast } from 'vue-sonner'
@@ -170,6 +257,17 @@ const providerSchema = computed(() => {
   return meta?.config_schema ?? null
 })
 
+const builtinMode = computed(() => {
+  if (curProvider?.value?.provider !== 'builtin') return 'off'
+  return configForm.memory_mode || 'off'
+})
+
+const builtinModeHighlightClass = computed(() => {
+  if (builtinMode.value === 'sparse') return 'translate-x-full'
+  if (builtinMode.value === 'dense') return 'translate-x-[200%]'
+  return 'translate-x-0'
+})
+
 watch(curProvider!, (val) => {
   if (val) {
     form.name = val.name ?? ''
@@ -180,11 +278,21 @@ watch(curProvider!, (val) => {
       })
     }
     if (val.provider === 'builtin') {
-      if (!configForm.memory_model_id) configForm.memory_model_id = ''
+      if (!configForm.memory_mode) configForm.memory_mode = 'off'
       if (!configForm.embedding_model_id) configForm.embedding_model_id = ''
     }
   }
 }, { immediate: true })
+
+function handleBuiltinModeChange(value: string | undefined) {
+  configForm.memory_mode = value || 'off'
+}
+
+function builtinModeButtonClass(mode: string) {
+  return builtinMode.value === mode
+    ? 'text-foreground'
+    : 'text-muted-foreground hover:text-foreground/90'
+}
 
 async function handleSave() {
   if (!curProvider?.value) return

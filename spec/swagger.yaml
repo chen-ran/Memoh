@@ -76,6 +76,189 @@ definitions:
       display_name:
         type: string
     type: object
+  adapters.CDFPoint:
+    properties:
+      cumulative:
+        description: cumulative weight fraction [0.0, 1.0]
+        type: number
+      k:
+        description: rank position (1-based, sorted by value desc)
+        type: integer
+    type: object
+  adapters.CompactResult:
+    properties:
+      after_count:
+        type: integer
+      before_count:
+        type: integer
+      ratio:
+        type: number
+      results:
+        items:
+          $ref: '#/definitions/adapters.MemoryItem'
+        type: array
+    type: object
+  adapters.DeleteResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  adapters.MemoryItem:
+    properties:
+      agent_id:
+        type: string
+      bot_id:
+        type: string
+      cdf_curve:
+        items:
+          $ref: '#/definitions/adapters.CDFPoint'
+        type: array
+      created_at:
+        type: string
+      hash:
+        type: string
+      id:
+        type: string
+      memory:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      run_id:
+        type: string
+      score:
+        type: number
+      top_k_buckets:
+        items:
+          $ref: '#/definitions/adapters.TopKBucket'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  adapters.Message:
+    properties:
+      content:
+        type: string
+      role:
+        type: string
+    type: object
+  adapters.ProviderConfigSchema:
+    properties:
+      fields:
+        additionalProperties:
+          $ref: '#/definitions/adapters.ProviderFieldSchema'
+        type: object
+    type: object
+  adapters.ProviderCreateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      provider:
+        $ref: '#/definitions/adapters.ProviderType'
+    type: object
+  adapters.ProviderFieldSchema:
+    properties:
+      description:
+        type: string
+      example: {}
+      required:
+        type: boolean
+      secret:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  adapters.ProviderGetResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      provider:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  adapters.ProviderMeta:
+    properties:
+      config_schema:
+        $ref: '#/definitions/adapters.ProviderConfigSchema'
+      display_name:
+        type: string
+      provider:
+        type: string
+    type: object
+  adapters.ProviderType:
+    enum:
+    - builtin
+    - mem0
+    - openviking
+    type: string
+    x-enum-varnames:
+    - ProviderBuiltin
+    - ProviderMem0
+    - ProviderOpenViking
+  adapters.ProviderUpdateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+    type: object
+  adapters.RebuildResult:
+    properties:
+      fs_count:
+        type: integer
+      missing_count:
+        type: integer
+      restored_count:
+        type: integer
+      storage_count:
+        type: integer
+    type: object
+  adapters.SearchResponse:
+    properties:
+      relations:
+        items: {}
+        type: array
+      results:
+        items:
+          $ref: '#/definitions/adapters.MemoryItem'
+        type: array
+    type: object
+  adapters.TopKBucket:
+    properties:
+      index:
+        description: sparse dimension index (term hash)
+        type: integer
+      value:
+        description: weight (term frequency)
+        type: number
+    type: object
+  adapters.UsageResponse:
+    properties:
+      avg_text_bytes:
+        type: integer
+      count:
+        type: integer
+      estimated_storage_bytes:
+        type: integer
+      total_text_bytes:
+        type: integer
+    type: object
   bots.Bot:
     properties:
       allow_guest:
@@ -1175,7 +1358,7 @@ definitions:
         type: string
       messages:
         items:
-          $ref: '#/definitions/provider.Message'
+          $ref: '#/definitions/adapters.Message'
         type: array
       metadata:
         additionalProperties: {}
@@ -1640,183 +1823,6 @@ definitions:
         type: boolean
       type:
         $ref: '#/definitions/models.ModelType'
-    type: object
-  provider.CDFPoint:
-    properties:
-      cumulative:
-        description: cumulative weight fraction [0.0, 1.0]
-        type: number
-      k:
-        description: rank position (1-based, sorted by value desc)
-        type: integer
-    type: object
-  provider.CompactResult:
-    properties:
-      after_count:
-        type: integer
-      before_count:
-        type: integer
-      ratio:
-        type: number
-      results:
-        items:
-          $ref: '#/definitions/provider.MemoryItem'
-        type: array
-    type: object
-  provider.DeleteResponse:
-    properties:
-      message:
-        type: string
-    type: object
-  provider.MemoryItem:
-    properties:
-      agent_id:
-        type: string
-      bot_id:
-        type: string
-      cdf_curve:
-        items:
-          $ref: '#/definitions/provider.CDFPoint'
-        type: array
-      created_at:
-        type: string
-      hash:
-        type: string
-      id:
-        type: string
-      memory:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      run_id:
-        type: string
-      score:
-        type: number
-      top_k_buckets:
-        items:
-          $ref: '#/definitions/provider.TopKBucket'
-        type: array
-      updated_at:
-        type: string
-    type: object
-  provider.Message:
-    properties:
-      content:
-        type: string
-      role:
-        type: string
-    type: object
-  provider.ProviderConfigSchema:
-    properties:
-      fields:
-        additionalProperties:
-          $ref: '#/definitions/provider.ProviderFieldSchema'
-        type: object
-    type: object
-  provider.ProviderCreateRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      provider:
-        $ref: '#/definitions/provider.ProviderType'
-    type: object
-  provider.ProviderFieldSchema:
-    properties:
-      description:
-        type: string
-      example: {}
-      required:
-        type: boolean
-      title:
-        type: string
-      type:
-        type: string
-    type: object
-  provider.ProviderGetResponse:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      is_default:
-        type: boolean
-      name:
-        type: string
-      provider:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  provider.ProviderMeta:
-    properties:
-      config_schema:
-        $ref: '#/definitions/provider.ProviderConfigSchema'
-      display_name:
-        type: string
-      provider:
-        type: string
-    type: object
-  provider.ProviderType:
-    enum:
-    - builtin
-    type: string
-    x-enum-varnames:
-    - ProviderBuiltin
-  provider.ProviderUpdateRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  provider.RebuildResult:
-    properties:
-      fs_count:
-        type: integer
-      missing_count:
-        type: integer
-      qdrant_count:
-        type: integer
-      restored_count:
-        type: integer
-    type: object
-  provider.SearchResponse:
-    properties:
-      relations:
-        items: {}
-        type: array
-      results:
-        items:
-          $ref: '#/definitions/provider.MemoryItem'
-        type: array
-    type: object
-  provider.TopKBucket:
-    properties:
-      index:
-        description: sparse dimension index (term hash)
-        type: integer
-      value:
-        description: weight (term frequency)
-        type: number
-    type: object
-  provider.UsageResponse:
-    properties:
-      avg_text_bytes:
-        type: integer
-      count:
-        type: integer
-      estimated_storage_bytes:
-        type: integer
-      total_text_bytes:
-        type: integer
     type: object
   providers.CountResponse:
     properties:
@@ -4153,7 +4159,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.DeleteResponse'
+            $ref: '#/definitions/adapters.DeleteResponse'
         "400":
           description: Bad Request
           schema:
@@ -4191,7 +4197,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.SearchResponse'
+            $ref: '#/definitions/adapters.SearchResponse'
         "400":
           description: Bad Request
           schema:
@@ -4233,7 +4239,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.SearchResponse'
+            $ref: '#/definitions/adapters.SearchResponse'
         "400":
           description: Bad Request
           schema:
@@ -4273,7 +4279,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.DeleteResponse'
+            $ref: '#/definitions/adapters.DeleteResponse'
         "400":
           description: Bad Request
           schema:
@@ -4324,7 +4330,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.CompactResult'
+            $ref: '#/definitions/adapters.CompactResult'
         "400":
           description: Bad Request
           schema:
@@ -4360,7 +4366,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.RebuildResult'
+            $ref: '#/definitions/adapters.RebuildResult'
         "400":
           description: Bad Request
           schema:
@@ -4403,7 +4409,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.SearchResponse'
+            $ref: '#/definitions/adapters.SearchResponse'
         "400":
           description: Bad Request
           schema:
@@ -4442,7 +4448,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.UsageResponse'
+            $ref: '#/definitions/adapters.UsageResponse'
         "400":
           description: Bad Request
           schema:
@@ -6206,7 +6212,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/provider.ProviderGetResponse'
+              $ref: '#/definitions/adapters.ProviderGetResponse'
             type: array
         "500":
           description: Internal Server Error
@@ -6225,14 +6231,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/provider.ProviderCreateRequest'
+          $ref: '#/definitions/adapters.ProviderCreateRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/provider.ProviderGetResponse'
+            $ref: '#/definitions/adapters.ProviderGetResponse'
         "400":
           description: Bad Request
           schema:
@@ -6281,7 +6287,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.ProviderGetResponse'
+            $ref: '#/definitions/adapters.ProviderGetResponse'
         "400":
           description: Bad Request
           schema:
@@ -6308,14 +6314,14 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/provider.ProviderUpdateRequest'
+          $ref: '#/definitions/adapters.ProviderUpdateRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/provider.ProviderGetResponse'
+            $ref: '#/definitions/adapters.ProviderGetResponse'
         "400":
           description: Bad Request
           schema:
@@ -6335,7 +6341,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/provider.ProviderMeta'
+              $ref: '#/definitions/adapters.ProviderMeta'
             type: array
       summary: List memory provider metadata
       tags:
