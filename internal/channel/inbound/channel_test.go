@@ -629,8 +629,8 @@ func TestChannelInboundProcessorGroupMentionTriggersReply(t *testing.T) {
 	if len(sender.sent) != 1 {
 		t.Fatalf("expected one outbound reply, got %d", len(sender.sent))
 	}
-	if !gateway.gotReq.UserMessagePersisted {
-		t.Fatalf("expected UserMessagePersisted=true for pre-persisted inbound message")
+	if gateway.gotReq.UserMessagePersisted {
+		t.Fatalf("expected UserMessagePersisted=false: user message persistence is deferred to storeRound")
 	}
 }
 
@@ -649,7 +649,7 @@ func (s *failingOpenStreamSender) OpenStream(_ context.Context, _ string, _ chan
 	return nil, errors.New("open stream failed")
 }
 
-func TestChannelInboundProcessorPersistsActiveChatBeforeOpenStream(t *testing.T) {
+func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-openstream"}}
 	memberSvc := &fakeMemberService{isMember: true}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-openstream", RouteID: "route-openstream"}}
@@ -674,11 +674,8 @@ func TestChannelInboundProcessorPersistsActiveChatBeforeOpenStream(t *testing.T)
 	if err == nil || err.Error() != "stream unavailable" {
 		t.Fatalf("expected open stream error, got: %v", err)
 	}
-	if len(chatSvc.persistedIn) != 1 {
-		t.Fatalf("expected active-chat user turn to be persisted before stream open, got %d", len(chatSvc.persistedIn))
-	}
-	if got := chatSvc.persistedIn[0].ExternalMessageID; got != "msg-openstream-1" {
-		t.Fatalf("unexpected persisted external_message_id: %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("runner should not be called when stream open fails")
@@ -727,14 +724,8 @@ func TestChannelInboundProcessorPersistsAttachmentAssetRefs(t *testing.T) {
 	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(chatSvc.persistedIn) != 1 {
-		t.Fatalf("expected one persisted input, got %d", len(chatSvc.persistedIn))
-	}
-	if len(chatSvc.persistedIn[0].Assets) != 1 {
-		t.Fatalf("expected one persisted asset ref, got %d", len(chatSvc.persistedIn[0].Assets))
-	}
-	if got := chatSvc.persistedIn[0].Assets[0].ContentHash; got != "asset-1" {
-		t.Fatalf("expected persisted content_hash asset-1, got %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 	if len(gateway.gotReq.Attachments) != 1 {
 		t.Fatalf("expected one gateway attachment, got %d", len(gateway.gotReq.Attachments))
@@ -796,11 +787,8 @@ func TestChannelInboundProcessorIngestsPlatformKeyWithResolver(t *testing.T) {
 	if got := gateway.gotReq.Attachments[0].ContentHash; got != "asset-resolved-1" {
 		t.Fatalf("expected resolved asset id, got %q", got)
 	}
-	if len(chatSvc.persistedIn) != 1 || len(chatSvc.persistedIn[0].Assets) != 1 {
-		t.Fatalf("expected one persisted asset ref, got %+v", chatSvc.persistedIn)
-	}
-	if got := chatSvc.persistedIn[0].Assets[0].ContentHash; got != "asset-resolved-1" {
-		t.Fatalf("expected persisted content_hash asset-resolved-1, got %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 }
 
@@ -871,11 +859,8 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	if !strings.HasPrefix(gotAttachment.Path, "/data/media/") {
 		t.Fatalf("expected attachment path under /data/media/, got %q", gotAttachment.Path)
 	}
-	if len(chatSvc.persistedIn) != 1 || len(chatSvc.persistedIn[0].Assets) != 1 {
-		t.Fatalf("expected one persisted asset ref, got %+v", chatSvc.persistedIn)
-	}
-	if got := chatSvc.persistedIn[0].Assets[0].ContentHash; got != "asset-base64-1" {
-		t.Fatalf("expected persisted content_hash asset-base64-1, got %q", got)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
 	}
 }
 

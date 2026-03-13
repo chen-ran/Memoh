@@ -167,6 +167,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 			return
 		}
 
+		rawText := text
 		attachments := a.collectAttachments(m.Message)
 		chatType := "direct"
 		if m.GuildID != "" {
@@ -223,6 +224,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 				"guild_id":        m.GuildID,
 				"is_mentioned":    isMentioned,
 				"is_reply_to_bot": isReplyToBot,
+				"raw_text":        rawText,
 			},
 		}
 
@@ -378,7 +380,15 @@ func discordAttachmentToFile(ctx context.Context, att channel.Attachment, opener
 		}
 	}
 
-	// Fallback to URL
+	// Fallback to data URL in URL field (e.g. TTS voice when media ingestion failed)
+	if reader == nil && att.URL != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.URL)), "data:") {
+		data, err := base64DataURLToBytes(att.URL)
+		if err == nil {
+			reader = bytes.NewReader(data)
+		}
+	}
+
+	// Fallback to HTTP URL
 	if reader == nil && att.URL != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, att.URL, nil)
 		if err == nil {

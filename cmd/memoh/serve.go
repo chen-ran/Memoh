@@ -31,6 +31,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
 	"github.com/memohai/memoh/internal/channel/adapters/feishu"
 	"github.com/memohai/memoh/internal/channel/adapters/local"
+	"github.com/memohai/memoh/internal/channel/adapters/qq"
 	"github.com/memohai/memoh/internal/channel/adapters/telegram"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
 	"github.com/memohai/memoh/internal/channel/identities"
@@ -51,10 +52,12 @@ import (
 	"github.com/memohai/memoh/internal/healthcheck"
 	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
 	mcpchecker "github.com/memohai/memoh/internal/healthcheck/checkers/mcp"
+	modelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/model"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/inbox"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
+	mcpbrowser "github.com/memohai/memoh/internal/mcp/providers/browser"
 	mcpcontacts "github.com/memohai/memoh/internal/mcp/providers/contacts"
 	mcpcontainer "github.com/memohai/memoh/internal/mcp/providers/container"
 	mcpemail "github.com/memohai/memoh/internal/mcp/providers/email"
@@ -62,7 +65,11 @@ import (
 	mcpmemory "github.com/memohai/memoh/internal/mcp/providers/memory"
 	mcpmessage "github.com/memohai/memoh/internal/mcp/providers/message"
 	mcpschedule "github.com/memohai/memoh/internal/mcp/providers/schedule"
+	mcpskill "github.com/memohai/memoh/internal/mcp/providers/skill"
+	mcpsubagent "github.com/memohai/memoh/internal/mcp/providers/subagent"
+	mcptts "github.com/memohai/memoh/internal/mcp/providers/tts"
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
+	mcpwebfetch "github.com/memohai/memoh/internal/mcp/providers/webfetch"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
 	"github.com/memohai/memoh/internal/media"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
@@ -81,6 +88,8 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/subagent"
+	ttspkg "github.com/memohai/memoh/internal/tts"
+	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
 )
 
@@ -113,6 +122,9 @@ func runServe() {
 			bind.NewService,
 			event.NewHub,
 			inbox.NewService,
+			provideTtsRegistry,
+			ttspkg.NewService,
+			provideTtsTempStore,
 			provideEmailRegistry,
 			emailpkg.NewService,
 			emailpkg.NewOutboxService,
@@ -149,11 +161,14 @@ func runServe() {
 			provideServerHandler(handlers.NewPreauthHandler),
 			provideServerHandler(handlers.NewBindHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
+			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewSubagentHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewTtsProvidersHandler),
+			provideServerHandler(handlers.NewBotTtsHandler),
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
@@ -164,6 +179,8 @@ func runServe() {
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideOAuthService,
 			provideServerHandler(handlers.NewInboxHandler),
+			provideServerHandler(handlers.NewTokenUsageHandler),
+			provideServerHandler(handlers.NewBrowserContextsHandler),
 			provideServerHandler(provideCLIHandler),
 			provideServerHandler(provideWebHandler),
 			provideServerHandler(handlers.NewEmbeddedWebHandler),
@@ -177,6 +194,7 @@ func runServe() {
 			startEmailManager,
 			startContainerReconciliation,
 			startAgentRuntime,
+			startTtsTempStoreCleanup,
 			startServer,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
@@ -304,7 +322,11 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	tgAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(tgAdapter)
 	discordAdapter := discord.NewDiscordAdapter(log)
+	discordAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(discordAdapter)
+	qqAdapter := qq.NewQQAdapter(log)
+	qqAdapter.SetAssetOpener(mediaService)
+	registry.MustRegister(qqAdapter)
 	feishuAdapter := feishu.NewFeishuAdapter(log)
 	feishuAdapter.SetAssetOpener(mediaService)
 	registry.MustRegister(feishuAdapter)
@@ -314,11 +336,22 @@ func provideChannelRegistry(log *slog.Logger, hub *local.RouteHub, mediaService 
 	return registry
 }
 
-func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, policyService *policy.Service, preauthService *preauth.Service, bindService *bind.Service, mediaService *media.Service, inboxService *inbox.Service, subagentService *subagent.Service, scheduleService *schedule.Service, settingsService *settings.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *mcp.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
+func provideChannelRouter(log *slog.Logger, registry *channel.Registry, hub *local.RouteHub, routeService *route.DBService, msgService *message.DBService, resolver *flow.Resolver, identityService *identities.Service, botService *bots.Service, policyService *policy.Service, preauthService *preauth.Service, bindService *bind.Service, mediaService *media.Service, inboxService *inbox.Service, ttsService *ttspkg.Service, settingsService *settings.Service, subagentService *subagent.Service, scheduleService *schedule.Service, mcpConnService *mcp.ConnectionService, modelsService *models.Service, providersService *providers.Service, memProvService *memprovider.Service, searchProvService *searchproviders.Service, browserCtxService *browsercontexts.Service, emailService *emailpkg.Service, emailOutboxService *emailpkg.OutboxService, heartbeatService *heartbeat.Service, queries *dbsqlc.Queries, containerdHandler *handlers.ContainerdHandler, manager *mcp.Manager, rc *boot.RuntimeConfig) *inbound.ChannelInboundProcessor {
+	adapter, ok := registry.Get(qq.Type)
+	if !ok {
+		panic("qq adapter not registered")
+	}
+	qqAdapter, ok := adapter.(*qq.QQAdapter)
+	if !ok {
+		panic("qq adapter has unexpected type")
+	}
+	qqAdapter.SetChannelIdentityResolver(identityService)
+	qqAdapter.SetRouteResolver(routeService)
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, botService, policyService, preauthService, bindService, rc.JwtSecret, 5*time.Minute)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetInboxService(inboxService)
+	processor.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	processor.SetCommandHandler(command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService},
@@ -347,6 +380,7 @@ func provideChannelManager(log *slog.Logger, registry *channel.Registry, channel
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
 	}
+	channelRouter.SetReactor(mgr)
 	return mgr
 }
 
@@ -375,7 +409,7 @@ func provideOAuthService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideToolGatewayService(log *slog.Logger, _ config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, _ *conversation.Service, _ *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, _ *conversation.Service, _ *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
@@ -390,7 +424,12 @@ func provideToolGatewayService(log *slog.Logger, _ config.Config, channelManager
 	fsExec := mcpcontainer.NewExecutor(log, manager, config.DefaultDataMount)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
 	emailExec := mcpemail.NewExecutor(log, emailService, emailManager)
-	svc := mcp.NewToolGatewayService(log, []mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec}, []mcp.ToolSource{fedSource})
+	webFetchExec := mcpwebfetch.NewExecutor(log)
+	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, cfg.AgentGateway.BaseURL())
+	skillExec := mcpskill.NewExecutor(log)
+	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, manager, cfg.BrowserGateway)
+	ttsExec := mcptts.NewExecutor(log, settingsService, ttsService, channelManager, registry)
+	svc := mcp.NewToolGatewayService(log, []mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec, webFetchExec, subagentExec, skillExec, browserExec, ttsExec}, []mcp.ToolSource{fedSource})
 	containerdHandler.SetToolGatewayService(svc)
 	return svc
 }
@@ -429,15 +468,19 @@ func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, ide
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
 
-func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
 	h.SetResolver(resolver)
+	h.SetMediaService(mediaService)
+	h.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	return h
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
 	h.SetResolver(resolver)
+	h.SetMediaService(mediaService)
+	h.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	return h
 }
 
@@ -580,7 +623,7 @@ func startAgentRuntime(lc fx.Lifecycle, manager *agentruntime.Manager) {
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, manager *mcp.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdowner fx.Shutdowner, cfg config.Config, queries *dbsqlc.Queries, botService *bots.Service, containerdHandler *handlers.ContainerdHandler, manager *mcp.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -594,6 +637,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *memohServer, shutdow
 			})
 			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(mcpchecker.NewChecker(logger, mcpConnService, toolGateway)))
 			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(channelchecker.NewChecker(logger, channelManager)))
+			botService.AddRuntimeChecker(healthcheck.NewRuntimeCheckerAdapter(modelchecker.NewChecker(logger, modelchecker.NewQueriesLookup(queries), modelsService)))
 			go func() {
 				if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 					logger.Error("server failed", slog.Any("error", err))
@@ -663,6 +707,44 @@ func hasAnyPrefix(path string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+func provideTtsRegistry(log *slog.Logger) *ttspkg.Registry {
+	reg := ttspkg.NewRegistry()
+	reg.Register(ttsedge.NewEdgeAdapter(log))
+	return reg
+}
+
+func provideTtsTempStore() (*ttspkg.TempStore, error) {
+	return ttspkg.NewTempStore(os.TempDir())
+}
+
+func startTtsTempStoreCleanup(lc fx.Lifecycle, store *ttspkg.TempStore) {
+	done := make(chan struct{})
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			go store.StartCleanup(done)
+			return nil
+		},
+		OnStop: func(_ context.Context) error {
+			close(done)
+			return nil
+		},
+	})
+}
+
+// settingsTtsModelResolver adapts settings.Service to the ttsModelResolver interface
+// expected by ChannelInboundProcessor and LocalChannelHandler.
+type settingsTtsModelResolver struct {
+	settings *settings.Service
+}
+
+func (r *settingsTtsModelResolver) ResolveTtsModelID(ctx context.Context, botID string) (string, error) {
+	s, err := r.settings.GetBot(ctx, botID)
+	if err != nil {
+		return "", err
+	}
+	return s.TtsModelID, nil
 }
 
 func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore) *emailpkg.Registry {

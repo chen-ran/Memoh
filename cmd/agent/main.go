@@ -65,6 +65,7 @@ import (
 	mcpschedule "github.com/memohai/memoh/internal/mcp/providers/schedule"
 	mcpskill "github.com/memohai/memoh/internal/mcp/providers/skill"
 	mcpsubagent "github.com/memohai/memoh/internal/mcp/providers/subagent"
+	mcptts "github.com/memohai/memoh/internal/mcp/providers/tts"
 	mcpweb "github.com/memohai/memoh/internal/mcp/providers/web"
 	mcpwebfetch "github.com/memohai/memoh/internal/mcp/providers/webfetch"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
@@ -85,6 +86,8 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/subagent"
+	ttspkg "github.com/memohai/memoh/internal/tts"
+	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
 )
 
@@ -178,6 +181,11 @@ func runServe() {
 			event.NewHub,
 			inbox.NewService,
 
+			// tts infrastructure
+			provideTtsRegistry,
+			ttspkg.NewService,
+			provideTtsTempStore,
+
 			// email infrastructure
 			emailpkg.NewDBOAuthTokenStore,
 			provideEmailRegistry,
@@ -231,6 +239,8 @@ func runServe() {
 			provideServerHandler(feishu.NewWebhookServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewTtsProvidersHandler),
+			provideServerHandler(handlers.NewBotTtsHandler),
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
@@ -254,6 +264,7 @@ func runServe() {
 			startChannelManager,
 			startEmailManager,
 			startContainerReconciliation,
+			startTtsTempStoreCleanup,
 			startServer,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
@@ -438,9 +449,10 @@ func provideChannelRouter(
 	bindService *bind.Service,
 	mediaService *media.Service,
 	inboxService *inbox.Service,
+	ttsService *ttspkg.Service,
+	settingsService *settings.Service,
 	subagentService *subagent.Service,
 	scheduleService *schedule.Service,
-	settingsService *settings.Service,
 	mcpConnService *mcp.ConnectionService,
 	modelsService *models.Service,
 	providersService *providers.Service,
@@ -470,6 +482,7 @@ func provideChannelRouter(
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetInboxService(inboxService)
+	processor.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	processor.SetCommandHandler(command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService},
@@ -531,7 +544,7 @@ func provideOAuthService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, _ *conversation.Service, _ *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, _ *conversation.Service, _ *accounts.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *mcp.Manager, containerdHandler *handlers.ContainerdHandler, mcpConnService *mcp.ConnectionService, mediaService *media.Service, inboxService *inbox.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, subagentService *subagent.Service, modelsService *models.Service, browserContextService *browsercontexts.Service, queries *dbsqlc.Queries, ttsService *ttspkg.Service) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	var assetResolver mcpmessage.AssetResolver
 	if mediaService != nil {
@@ -550,10 +563,11 @@ func provideToolGatewayService(log *slog.Logger, cfg config.Config, channelManag
 	subagentExec := mcpsubagent.NewExecutor(log, subagentService, settingsService, modelsService, queries, cfg.AgentGateway.BaseURL())
 	skillExec := mcpskill.NewExecutor(log)
 	browserExec := mcpbrowser.NewExecutor(log, settingsService, browserContextService, manager, cfg.BrowserGateway)
+	ttsExec := mcptts.NewExecutor(log, settingsService, ttsService, channelManager, registry)
 
 	svc := mcp.NewToolGatewayService(
 		log,
-		[]mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec, webFetchExec, subagentExec, skillExec, browserExec},
+		[]mcp.ToolExecutor{messageExec, contactsExec, scheduleExec, memoryExec, webExec, fsExec, inboxExec, emailExec, webFetchExec, subagentExec, skillExec, browserExec, ttsExec},
 		[]mcp.ToolSource{fedSource},
 	)
 	containerdHandler.SetToolGatewayService(svc)
@@ -591,21 +605,63 @@ func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, ide
 	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
 }
 
-func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+func provideCLIHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.CLIType, channelManager, channelStore, chatService, hub, botService, accountService)
 	h.SetResolver(resolver)
+	h.SetMediaService(mediaService)
+	h.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	return h
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, ttsService *ttspkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
 	h.SetResolver(resolver)
+	h.SetMediaService(mediaService)
+	h.SetTtsService(ttsService, &settingsTtsModelResolver{settings: settingsService})
 	return h
 }
 
 // ---------------------------------------------------------------------------
 // email providers
 // ---------------------------------------------------------------------------
+
+func provideTtsRegistry(log *slog.Logger) *ttspkg.Registry {
+	reg := ttspkg.NewRegistry()
+	reg.Register(ttsedge.NewEdgeAdapter(log))
+	return reg
+}
+
+func provideTtsTempStore() (*ttspkg.TempStore, error) {
+	return ttspkg.NewTempStore(os.TempDir())
+}
+
+func startTtsTempStoreCleanup(lc fx.Lifecycle, store *ttspkg.TempStore) {
+	done := make(chan struct{})
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			go store.StartCleanup(done)
+			return nil
+		},
+		OnStop: func(_ context.Context) error {
+			close(done)
+			return nil
+		},
+	})
+}
+
+// settingsTtsModelResolver adapts settings.Service to the ttsModelResolver interface
+// expected by ChannelInboundProcessor and LocalChannelHandler.
+type settingsTtsModelResolver struct {
+	settings *settings.Service
+}
+
+func (r *settingsTtsModelResolver) ResolveTtsModelID(ctx context.Context, botID string) (string, error) {
+	s, err := r.settings.GetBot(ctx, botID)
+	if err != nil {
+		return "", err
+	}
+	return s.TtsModelID, nil
+}
 
 func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore) *emailpkg.Registry {
 	reg := emailpkg.NewRegistry()
