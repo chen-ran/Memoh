@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -15,7 +16,7 @@ func runtimeBotID(botID string, filters map[string]any) (string, error) {
 		botID = strings.TrimSpace(anyString(filters, "scopeId"))
 	}
 	if botID == "" {
-		return "", fmt.Errorf("bot_id is required")
+		return "", errors.New("bot_id is required")
 	}
 	return botID, nil
 }

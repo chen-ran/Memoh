@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,7 +25,7 @@ type sparseRuntime struct {
 
 func newSparseRuntime(qdrantHost string, qdrantPort int, qdrantAPIKey, collection string) (*sparseRuntime, error) {
 	if strings.TrimSpace(qdrantHost) == "" {
-		return nil, fmt.Errorf("sparse runtime: qdrant host is required")
+		return nil, errors.New("sparse runtime: qdrant host is required")
 	}
 	qClient, err := qdrantclient.NewClient(qdrantHost, qdrantPort, qdrantAPIKey, collection)
 	if err != nil {
@@ -64,7 +65,7 @@ func (r *sparseRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapt
 		text = strings.Join(parts, "\n")
 	}
 	if text == "" {
-		return adapters.SearchResponse{}, fmt.Errorf("sparse runtime: message is required")
+		return adapters.SearchResponse{}, errors.New("sparse runtime: message is required")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -159,11 +160,11 @@ func (r *sparseRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) 
 func (r *sparseRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (adapters.MemoryItem, error) {
 	memoryID := strings.TrimSpace(req.MemoryID)
 	if memoryID == "" {
-		return adapters.MemoryItem{}, fmt.Errorf("sparse runtime: memory_id is required")
+		return adapters.MemoryItem{}, errors.New("sparse runtime: memory_id is required")
 	}
 	text := strings.TrimSpace(req.Memory)
 	if text == "" {
-		return adapters.MemoryItem{}, fmt.Errorf("sparse runtime: memory is required")
+		return adapters.MemoryItem{}, errors.New("sparse runtime: memory is required")
 	}
 	if err := r.ensureCollection(ctx); err != nil {
 		return adapters.MemoryItem{}, err

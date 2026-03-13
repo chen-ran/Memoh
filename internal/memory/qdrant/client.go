@@ -5,6 +5,8 @@ package qdrant
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	pb "github.com/qdrant/go-client/qdrant"
@@ -117,12 +119,16 @@ func (c *Client) Search(ctx context.Context, vec SparseVector, botID string, lim
 	if limit <= 0 {
 		limit = 10
 	}
+	queryLimit, err := intToUint64(limit)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant: invalid search limit: %w", err)
+	}
 	scored, err := c.inner.Query(ctx, &pb.QueryPoints{
 		CollectionName: c.collection,
 		Query:          pb.NewQuerySparse(vec.Indices, vec.Values),
 		Using:          strPtr(sparseVectorName),
 		Filter:         botFilter(botID),
-		Limit:          uint64Ptr(uint64(limit)),
+		Limit:          uint64Ptr(queryLimit),
 		WithPayload:    pb.NewWithPayload(true),
 	})
 	if err != nil {
@@ -153,7 +159,13 @@ func (c *Client) Scroll(ctx context.Context, botID string, limit int) ([]SearchR
 	if limit <= 0 {
 		limit = 1000
 	}
-	l := uint32(limit)
+	if limit > math.MaxUint32 {
+		limit = math.MaxUint32
+	}
+	l, err := intToUint32(limit)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant: invalid scroll limit: %w", err)
+	}
 	points, err := c.inner.Scroll(ctx, &pb.ScrollPoints{
 		CollectionName: c.collection,
 		Filter:         botFilter(botID),
@@ -180,6 +192,9 @@ func (c *Client) Count(ctx context.Context, botID string) (int, error) {
 	})
 	if err != nil {
 		return 0, fmt.Errorf("qdrant: count: %w", err)
+	}
+	if n > uint64(math.MaxInt) {
+		return 0, fmt.Errorf("qdrant: count overflow: %d", n)
 	}
 	return int(n), nil
 }
@@ -288,9 +303,21 @@ func extractID(id *pb.PointId) string {
 	if uuid := id.GetUuid(); uuid != "" {
 		return uuid
 	}
-	return fmt.Sprintf("%d", id.GetNum())
+	return strconv.FormatUint(id.GetNum(), 10)
 }
 
 func strPtr(s string) *string { return &s }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
+
+func intToUint64(v int) (uint64, error) {
+	return strconv.ParseUint(strconv.Itoa(v), 10, 64)
+}
+
+func intToUint32(v int) (uint32, error) {
+	n, err := strconv.ParseUint(strconv.Itoa(v), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(n), nil
+}

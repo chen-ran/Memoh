@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,7 +20,7 @@ type denseRuntime struct {
 func newDenseRuntime(config map[string]any) (*denseRuntime, error) {
 	baseURL := adapters.StringFromConfig(config, "mem0_base_url")
 	if strings.TrimSpace(baseURL) == "" {
-		return nil, fmt.Errorf("dense runtime: mem0_base_url is required")
+		return nil, errors.New("dense runtime: mem0_base_url is required")
 	}
 	// Pass a mem0-compatible config to the existing mem0 provider constructor.
 	mem0Config := map[string]any{

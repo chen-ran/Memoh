@@ -7,9 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -49,16 +52,22 @@ func (c *Client) EncodeDocuments(ctx context.Context, texts []string) ([]SparseV
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/encode/documents", bytes.NewReader(body))
+	endpoint, err := joinEndpointURL(c.baseURL, "/encode/documents")
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.http.Do(req) //nolint:gosec // G704: URL is validated and derived from operator-configured sparse encoder base URL
 	if err != nil {
 		return nil, fmt.Errorf("sparse encode failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("sparse encode error (status %d): %s", resp.StatusCode, string(respBody))
@@ -75,16 +84,22 @@ func (c *Client) encode(ctx context.Context, path, text string) (*SparseVector, 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	endpoint, err := joinEndpointURL(c.baseURL, path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.http.Do(req) //nolint:gosec // G704: URL is validated and derived from operator-configured sparse encoder base URL
 	if err != nil {
 		return nil, fmt.Errorf("sparse encode failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("sparse encode error (status %d): %s", resp.StatusCode, string(respBody))
@@ -94,4 +109,28 @@ func (c *Client) encode(ctx context.Context, path, text string) (*SparseVector, 
 		return nil, err
 	}
 	return &vec, nil
+}
+
+func joinEndpointURL(baseURL, path string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", errors.New("sparse encode base URL is required")
+	}
+
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid sparse encode base URL: %w", err)
+	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return "", fmt.Errorf("invalid sparse encode base URL scheme: %q", base.Scheme)
+	}
+	if base.Host == "" {
+		return "", errors.New("invalid sparse encode base URL: host is required")
+	}
+
+	ref, err := url.Parse(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid sparse encode path: %w", err)
+	}
+	return base.ResolveReference(ref).String(), nil
 }

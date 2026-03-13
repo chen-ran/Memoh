@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/config"
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
 
 // BuiltinMemoryMode represents the operating mode of the built-in memory provider.
