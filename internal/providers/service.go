@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/db"
@@ -20,21 +21,27 @@ import (
 
 // Service handles provider operations.
 type Service struct {
-	queries *sqlc.Queries
-	logger  *slog.Logger
+	queries     *sqlc.Queries
+	logger      *slog.Logger
+	httpClient  *http.Client
+	callbackURL string
 }
 
 // NewService creates a new provider service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries *sqlc.Queries, callbackURL string) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Service{
-		queries: queries,
-		logger:  log.With(slog.String("service", "providers")),
+		queries:     queries,
+		logger:      log.With(slog.String("service", "providers")),
+		httpClient:  &http.Client{Timeout: providerOAuthHTTPTimeout},
+		callbackURL: callbackURL,
 	}
 }
 
 // Create creates a new LLM provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
-	// Marshal metadata
 	metadataJSON, err := json.Marshal(req.Metadata)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
@@ -112,13 +119,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		return GetResponse{}, err
 	}
 
-	// Get existing provider
 	existing, err := s.queries.GetLlmProviderByID(ctx, providerID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider: %w", err)
 	}
 
-	// Apply updates
 	name := existing.Name
 	if req.Name != nil {
 		name = *req.Name
@@ -146,16 +151,15 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		enable = *req.Enable
 	}
 
-	metadata := existing.Metadata
+	metadataMap := providerMetadata(existing.Metadata)
 	if req.Metadata != nil {
-		metadataJSON, err := json.Marshal(req.Metadata)
-		if err != nil {
-			return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
-		}
-		metadata = metadataJSON
+		metadataMap = req.Metadata
+	}
+	metadataJSON, err := json.Marshal(metadataMap)
+	if err != nil {
+		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	// Update provider
 	updated, err := s.queries.UpdateLlmProvider(ctx, sqlc.UpdateLlmProviderParams{
 		ID:         providerID,
 		Name:       name,
@@ -164,7 +168,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		ClientType: clientType,
 		Icon:       icon,
 		Enable:     enable,
-		Metadata:   metadata,
+		Metadata:   metadataJSON,
 	})
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update provider: %w", err)
@@ -213,8 +217,12 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 
 	clientType := models.ClientType(provider.ClientType)
+	creds, err := s.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return TestResponse{}, err
+	}
 
-	sdkProvider := models.NewSDKProvider(baseURL, provider.ApiKey, clientType, probeTimeout)
+	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
@@ -238,6 +246,29 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
+	if supportsOAuth(provider) {
+		catalog := openaicodex.Catalog()
+		remoteModels := make([]RemoteModel, 0, len(catalog))
+		for _, model := range catalog {
+			compatibilities := make([]string, 0, 2)
+			if model.SupportsToolCall {
+				compatibilities = append(compatibilities, models.CompatToolCall)
+			}
+			if model.SupportsReasoning {
+				compatibilities = append(compatibilities, models.CompatReasoning)
+			}
+			remoteModels = append(remoteModels, RemoteModel{
+				ID:               model.ID,
+				Name:             model.DisplayName,
+				Object:           "model",
+				OwnedBy:          "openai-codex",
+				Type:             "chat",
+				Compatibilities:  compatibilities,
+				ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
+			})
+		}
+		return remoteModels, nil
+	}
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
 	modelsURL := fmt.Sprintf("%s/models", baseURL)
@@ -250,7 +281,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	if provider.ApiKey != "" {
+	if provider.ApiKey != "" && !supportsOAuth(provider) {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.ApiKey))
 	}
 
@@ -284,7 +315,6 @@ func (s *Service) toGetResponse(provider sqlc.LlmProvider) GetResponse {
 		}
 	}
 
-	// Mask API key (show only first 8 characters)
 	maskedAPIKey := maskAPIKey(provider.ApiKey)
 
 	var icon string
@@ -318,7 +348,6 @@ func maskAPIKey(apiKey string) string {
 }
 
 // resolveUpdatedAPIKey keeps the original key when the request value matches the masked version.
-// This prevents masked placeholder values from overwriting the real stored credential.
 func resolveUpdatedAPIKey(existing string, updated *string) string {
 	if updated == nil {
 		return existing

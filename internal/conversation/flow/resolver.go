@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -24,6 +25,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -278,10 +280,17 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
+	authResolver := providers.NewService(nil, r.queries, "")
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return resolvedContext{}, fmt.Errorf("resolve provider credentials: %w", err)
+	}
+
 	modelCfg := models.SDKModelConfig{
 		ModelID:         chatModel.ModelID,
 		ClientType:      clientType,
-		APIKey:          provider.ApiKey,
+		APIKey:          creds.APIKey,
+		CodexAccountID:  creds.CodexAccountID,
 		BaseURL:         provider.BaseUrl,
 		ReasoningConfig: reasoningConfig,
 	}

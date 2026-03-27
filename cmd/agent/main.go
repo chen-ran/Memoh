@@ -165,7 +165,7 @@ func runServe() {
 			accounts.NewService,
 			acl.NewService,
 			settings.NewService,
-			providers.NewService,
+			provideProvidersService,
 			searchproviders.NewService,
 			browsercontexts.NewService,
 			policy.NewService,
@@ -228,6 +228,7 @@ func runServe() {
 			provideServerHandler(provideSessionHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),
+			provideServerHandler(handlers.NewProviderOAuthHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
@@ -763,6 +764,15 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 	reg.Register(emailmailgun.New(log))
 	reg.Register(emailgmail.New(log, tokenStore))
 	return reg
+}
+
+func provideProvidersService(log *slog.Logger, queries *dbsqlc.Queries, cfg config.Config) *providers.Service {
+	_ = cfg
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+}
+
+func defaultProviderOAuthCallbackURL() string {
+	return "http://localhost:1455/auth/callback"
 }
 
 func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"net/http"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -69,14 +70,17 @@ func SpawnSystemPrompt(sessionType string) string {
 	})
 }
 
-// SpawnModelCreatorFunc returns a tools.ModelCreator that delegates to models.NewSDKChatModel.
+// SpawnModelCreatorFunc returns a tools.ModelCreator backed by the shared SDK model factory.
+// This keeps subagent model creation aligned with the shared SDK model factory.
 func SpawnModelCreatorFunc() tools.ModelCreator {
-	return func(modelID, clientType, apiKey, baseURL string) *sdk.Model {
+	return func(modelID, clientType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model {
 		return models.NewSDKChatModel(models.SDKModelConfig{
-			ModelID:    modelID,
-			ClientType: clientType,
-			APIKey:     apiKey,
-			BaseURL:    baseURL,
+			ModelID:        modelID,
+			ClientType:     clientType,
+			APIKey:         apiKey,
+			CodexAccountID: codexAccountID,
+			BaseURL:        baseURL,
+			HTTPClient:     httpClient,
 		})
 	}
 }

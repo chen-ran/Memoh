@@ -44,7 +44,10 @@
         </FormField>
       </section>
 
-      <section class="space-y-2">
+      <section
+        v-if="form.values.client_type !== 'openai-codex'"
+        class="space-y-2"
+      >
         <h4 class="scroll-m-20 font-semibold tracking-tight">
           {{ $t('provider.apiKey') }}
         </h4>
@@ -56,7 +59,7 @@
             <FormControl>
               <Input
                 type="password"
-                :placeholder="props.provider?.api_key || $t('provider.apiKeyPlaceholder')"
+                :placeholder="providerWithAuth?.api_key || $t('provider.apiKeyPlaceholder')"
                 :aria-label="$t('provider.apiKey')"
                 v-bind="componentField"
               />
@@ -105,6 +108,67 @@
             </FormControl>
           </FormItem>
         </FormField>
+      </section>
+
+      <section
+        v-if="form.values.client_type === 'openai-codex'"
+        class="rounded-lg border p-4 space-y-3 text-sm"
+      >
+        <div class="space-y-1">
+          <div class="font-medium">
+            {{ $t('provider.oauth.title') }}
+          </div>
+          <div class="text-muted-foreground">
+            {{ $t('provider.oauth.description') }}
+          </div>
+          <div
+            class="text-xs"
+            :class="oauthExpired ? 'text-destructive' : 'text-muted-foreground'"
+          >
+            <template v-if="oauthStatusLoading">
+              {{ $t('provider.oauth.status.checking') }}
+            </template>
+            <template v-else-if="oauthStatus && !oauthStatus.configured">
+              {{ $t('provider.oauth.status.notConfigured') }}
+            </template>
+            <template v-else-if="oauthExpired">
+              {{ $t('provider.oauth.status.expired') }}
+            </template>
+            <template v-else-if="oauthStatus?.has_token">
+              {{ $t('provider.oauth.status.authorized') }}
+            </template>
+            <template v-else>
+              {{ $t('provider.oauth.status.missing') }}
+            </template>
+          </div>
+          <div
+            v-if="oauthStatus?.callback_url"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t('provider.oauth.callback') }}: {{ oauthStatus.callback_url }}
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <LoadingButton
+            type="button"
+            variant="outline"
+            :disabled="!canAuthorizeOAuth"
+            :loading="authorizeLoading"
+            @click="handleAuthorize"
+          >
+            <FontAwesomeIcon :icon="['fas', 'key']" />
+            {{ $t('provider.oauth.authorize') }}
+          </LoadingButton>
+          <LoadingButton
+            v-if="oauthStatus?.has_token"
+            type="button"
+            variant="ghost"
+            :loading="revokeLoading"
+            @click="handleRevoke"
+          >
+            {{ $t('provider.oauth.revoke') }}
+          </LoadingButton>
+        </div>
       </section>
     </div>
 
@@ -206,11 +270,22 @@ import { useForm } from 'vee-validate'
 import { postProvidersByIdTest } from '@memohai/sdk'
 import type { ProvidersGetResponse, ProvidersTestResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
 
 const { t } = useI18n()
 
+type ProviderWithAuth = Partial<ProvidersGetResponse>
+
+type ProviderOAuthStatus = {
+  configured: boolean
+  has_token: boolean
+  expired: boolean
+  callback_url?: string
+  expires_at?: string
+}
+
 const props = defineProps<{
-  provider: Partial<ProvidersGetResponse> | undefined
+  provider: ProviderWithAuth | undefined
   editLoading: boolean
   deleteLoading: boolean
 }>()
@@ -223,6 +298,13 @@ const emit = defineEmits<{
 const testLoading = ref(false)
 const testResult = ref<ProvidersTestResponse | null>(null)
 const testError = ref('')
+const oauthStatus = ref<ProviderOAuthStatus | null>(null)
+const oauthStatusLoading = ref(false)
+const authorizeLoading = ref(false)
+const revokeLoading = ref(false)
+const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
+
+const providerWithAuth = computed(() => props.provider as ProviderWithAuth | undefined)
 
 async function runTest() {
   if (!props.provider?.id) return
@@ -265,6 +347,14 @@ const providerSchema = toTypedSchema(z.object({
   metadata: z.object({
     additionalProp1: z.object({}),
   }),
+}).superRefine((value, ctx) => {
+  if (value.client_type !== 'openai-codex' && !value.api_key?.trim() && !providerWithAuth.value?.api_key) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['api_key'],
+      message: 'API key is required',
+    })
+  }
 }))
 
 const form = useForm({
@@ -281,6 +371,24 @@ watch(() => props.provider, (newVal) => {
       client_type: newVal.client_type || 'openai-completions',
     })
   }
+}, { immediate: true })
+
+watch(() => form.values.client_type, (clientType) => {
+  if (clientType !== 'openai-codex') {
+    oauthStatus.value = null
+    return
+  }
+  if (!form.values.base_url) {
+    form.setFieldValue('base_url', 'https://chatgpt.com/backend-api')
+  }
+})
+
+watch(() => [props.provider?.id, form.values.client_type] as const, async ([id, clientType]) => {
+  if (!id || clientType !== 'openai-codex') {
+    oauthStatus.value = null
+    return
+  }
+  await fetchOAuthStatus()
 }, { immediate: true })
 
 const hasChanges = computed(() => {
@@ -316,4 +424,78 @@ const editProvider = form.handleSubmit(async (value) => {
   }
   emit('submit', payload)
 })
+
+const oauthExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
+const canAuthorizeOAuth = computed(() =>
+  Boolean(
+    props.provider?.id
+    && form.values.client_type === 'openai-codex',
+  ) && !oauthStatusLoading.value,
+)
+
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function fetchOAuthStatus() {
+  if (!props.provider?.id) return
+  oauthStatusLoading.value = true
+  try {
+    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/status`, {
+      headers: authHeaders(),
+    })
+    if (!response.ok) throw new Error(t('provider.oauth.statusFailed'))
+    oauthStatus.value = await response.json() as ProviderOAuthStatus
+  } catch (error) {
+    oauthStatus.value = null
+    console.error('failed to load provider oauth status', error)
+  } finally {
+    oauthStatusLoading.value = false
+  }
+}
+
+async function handleAuthorize() {
+  if (!props.provider?.id) return
+  authorizeLoading.value = true
+  try {
+    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/authorize`, {
+      headers: authHeaders(),
+    })
+    if (!response.ok) throw new Error(t('provider.oauth.authorizeFailed'))
+    const data = await response.json() as { auth_url?: string }
+    if (!data.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
+    const popup = window.open(data.auth_url, 'provider-oauth', 'width=600,height=720')
+    const listener = async (event: MessageEvent) => {
+      if (event.data?.type !== 'memoh-provider-oauth-success') return
+      window.removeEventListener('message', listener)
+      popup?.close()
+      toast.success(t('provider.oauth.authorizeSuccess'))
+      await fetchOAuthStatus()
+    }
+    window.addEventListener('message', listener)
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+  } finally {
+    authorizeLoading.value = false
+  }
+}
+
+async function handleRevoke() {
+  if (!props.provider?.id) return
+  revokeLoading.value = true
+  try {
+    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/token`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!response.ok) throw new Error(t('provider.oauth.revokeFailed'))
+    toast.success(t('provider.oauth.revokeSuccess'))
+    await fetchOAuthStatus()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : t('provider.oauth.revokeFailed'))
+  } finally {
+    revokeLoading.value = false
+  }
+}
 </script>

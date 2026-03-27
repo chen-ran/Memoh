@@ -2,6 +2,9 @@ package models
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,11 +12,13 @@ import (
 
 	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
 	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
+	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
 	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/sqlc"
 )
 
 const probeTimeout = 15 * time.Second
@@ -37,16 +42,17 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 
 	baseURL := strings.TrimRight(provider.BaseUrl, "/")
-	apiKey := provider.ApiKey
 	clientType := ClientType(provider.ClientType)
-
-	// Embedding models don't have a chat Provider in the SDK — probe
-	// the /embeddings endpoint directly.
-	if model.Type == string(ModelTypeEmbedding) {
-		return s.testEmbeddingModel(ctx, string(clientType), baseURL, apiKey, model.ModelID)
+	creds, err := s.resolveModelCredentials(ctx, provider)
+	if err != nil {
+		return TestResponse{}, err
 	}
 
-	sdkProvider := NewSDKProvider(baseURL, apiKey, clientType, probeTimeout)
+	if model.Type == string(ModelTypeEmbedding) {
+		return s.testEmbeddingModel(ctx, baseURL, creds.APIKey, model.ModelID, nil)
+	}
+
+	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
 
@@ -100,11 +106,11 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 // testEmbeddingModel probes an embedding model by performing a minimal
 // embedding request via the Twilight SDK, verifying that the model is
 // reachable and functional rather than merely checking HTTP connectivity.
-func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, apiKey, modelID string) (TestResponse, error) {
+func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string, httpClient *http.Client) (TestResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	model := NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID, probeTimeout)
+	model := NewSDKEmbeddingModel(string(ClientTypeOpenAICompletions), baseURL, apiKey, modelID, probeTimeout, httpClient)
 	client := sdk.NewClient()
 
 	start := time.Now()
@@ -130,8 +136,10 @@ func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, api
 
 // NewSDKProvider creates a Twilight AI SDK Provider for the given client type.
 // It is exported so that other packages (e.g. providers) can reuse it for testing.
-func NewSDKProvider(baseURL, apiKey string, clientType ClientType, timeout time.Duration) sdk.Provider {
-	httpClient := &http.Client{Timeout: timeout}
+func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientType, timeout time.Duration, httpClient *http.Client) sdk.Provider {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
 
 	switch clientType {
 	case ClientTypeOpenAIResponses:
@@ -143,6 +151,16 @@ func NewSDKProvider(baseURL, apiKey string, clientType ClientType, timeout time.
 			opts = append(opts, openairesponses.WithBaseURL(baseURL))
 		}
 		return openairesponses.New(opts...)
+
+	case ClientTypeOpenAICodex:
+		opts := []openaicodex.Option{
+			openaicodex.WithAccessToken(apiKey),
+			openaicodex.WithHTTPClient(httpClient),
+		}
+		if codexAccountID != "" {
+			opts = append(opts, openaicodex.WithAccountID(codexAccountID))
+		}
+		return openaicodex.New(opts...)
 
 	case ClientTypeAnthropicMessages:
 		opts := []anthropicmessages.Option{
@@ -174,4 +192,56 @@ func NewSDKProvider(baseURL, apiKey string, clientType ClientType, timeout time.
 		}
 		return openaicompletions.New(opts...)
 	}
+}
+
+type modelCredentials struct {
+	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
+	CodexAccountID string
+}
+
+func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.LlmProvider) (modelCredentials, error) {
+	if ClientType(provider.ClientType) != ClientTypeOpenAICodex {
+		return modelCredentials{APIKey: provider.ApiKey}, nil
+	}
+
+	tokenRow, err := s.queries.GetLlmProviderOAuthTokenByProvider(ctx, provider.ID)
+	if err != nil {
+		return modelCredentials{}, err
+	}
+	accessToken := strings.TrimSpace(tokenRow.AccessToken)
+	if accessToken == "" {
+		return modelCredentials{}, errors.New("oauth token is missing access token")
+	}
+	accountID, err := codexAccountIDFromToken(accessToken)
+	if err != nil {
+		return modelCredentials{}, err
+	}
+	return modelCredentials{
+		APIKey:         accessToken,
+		CodexAccountID: accountID,
+	}, nil
+}
+
+func codexAccountIDFromToken(token string) (string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", errors.New("invalid oauth access token")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("decode oauth token payload: %w", err)
+	}
+	var claims struct {
+		OpenAIAuth struct {
+			ChatGPTAccountID string `json:"chatgpt_account_id"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", fmt.Errorf("parse oauth token payload: %w", err)
+	}
+	accountID := strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID)
+	if accountID == "" {
+		return "", errors.New("oauth access token missing chatgpt_account_id")
+	}
+	return accountID, nil
 }

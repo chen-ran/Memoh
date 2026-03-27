@@ -1,10 +1,12 @@
 package models
 
 import (
+	"net/http"
 	"strings"
 
 	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
 	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
+	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
 	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -16,7 +18,9 @@ type SDKModelConfig struct {
 	ModelID         string
 	ClientType      string
 	APIKey          string //nolint:gosec // carries provider credential material at runtime
+	CodexAccountID  string
 	BaseURL         string
+	HTTPClient      *http.Client
 	ReasoningConfig *ReasoningConfig
 }
 
@@ -38,6 +42,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
 		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaicompletions.WithHTTPClient(cfg.HTTPClient))
+		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
@@ -48,15 +55,33 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		opts := []openairesponses.Option{
 			openairesponses.WithAPIKey(cfg.APIKey),
 		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openairesponses.WithHTTPClient(cfg.HTTPClient))
+		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, openairesponses.WithBaseURL(cfg.BaseURL))
 		}
 		p := openairesponses.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 
+	case ClientTypeOpenAICodex:
+		opts := []openaicodex.Option{
+			openaicodex.WithAccessToken(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaicodex.WithHTTPClient(cfg.HTTPClient))
+		}
+		if cfg.CodexAccountID != "" {
+			opts = append(opts, openaicodex.WithAccountID(cfg.CodexAccountID))
+		}
+		return openaicodex.New(opts...).ChatModel(cfg.ModelID)
+
 	case ClientTypeAnthropicMessages:
 		opts := []anthropicmessages.Option{
 			anthropicmessages.WithAPIKey(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, anthropicmessages.WithHTTPClient(cfg.HTTPClient))
 		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, anthropicmessages.WithBaseURL(cfg.BaseURL))
@@ -75,6 +100,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		opts := []googlegenerative.Option{
 			googlegenerative.WithAPIKey(cfg.APIKey),
 		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, googlegenerative.WithHTTPClient(cfg.HTTPClient))
+		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, googlegenerative.WithBaseURL(cfg.BaseURL))
 		}
@@ -84,6 +112,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 	default:
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaicompletions.WithHTTPClient(cfg.HTTPClient))
 		}
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
@@ -106,7 +137,7 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 	switch ClientType(cfg.ClientType) {
 	case ClientTypeAnthropicMessages:
 		return nil
-	case ClientTypeOpenAIResponses, ClientTypeOpenAICompletions:
+	case ClientTypeOpenAIResponses, ClientTypeOpenAICompletions, ClientTypeOpenAICodex:
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
 	case ClientTypeGoogleGenerativeAI:
 		return nil
@@ -147,6 +178,8 @@ func ResolveClientType(model *sdk.Model) string {
 		return string(ClientTypeAnthropicMessages)
 	case strings.Contains(name, "google"):
 		return string(ClientTypeGoogleGenerativeAI)
+	case strings.Contains(name, "codex"):
+		return string(ClientTypeOpenAICodex)
 	case strings.Contains(name, "responses"):
 		return string(ClientTypeOpenAIResponses)
 	default:

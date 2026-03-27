@@ -55,12 +55,25 @@ type TestResponse struct {
 	Message   string `json:"message,omitempty"`
 }
 
+// OAuthStatus is returned by GET /providers/:id/oauth/status.
+type OAuthStatus struct {
+	Configured  bool       `json:"configured"`
+	HasToken    bool       `json:"has_token"`
+	Expired     bool       `json:"expired"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CallbackURL string     `json:"callback_url"`
+}
+
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	ID               string   `json:"id"`
+	Object           string   `json:"object"`
+	Created          int64    `json:"created"`
+	OwnedBy          string   `json:"owned_by"`
+	Name             string   `json:"name,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Compatibilities  []string `json:"compatibilities,omitempty"`
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 }
 
 // FetchModelsResponse represents the response from the provider's /v1/models endpoint.

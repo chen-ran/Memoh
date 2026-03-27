@@ -104,10 +104,12 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
 	model := models.NewSDKChatModel(models.SDKModelConfig{
-		ClientType: cfg.ClientType,
-		BaseURL:    cfg.BaseURL,
-		APIKey:     cfg.APIKey,
-		ModelID:    cfg.ModelID,
+		ClientType:     cfg.ClientType,
+		BaseURL:        cfg.BaseURL,
+		APIKey:         cfg.APIKey,
+		CodexAccountID: cfg.CodexAccountID,
+		ModelID:        cfg.ModelID,
+		HTTPClient:     cfg.HTTPClient,
 	})
 
 	result, err := sdk.GenerateTextResult(ctx,

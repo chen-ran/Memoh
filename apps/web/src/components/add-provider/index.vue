@@ -47,6 +47,7 @@
             </FormItem>
           </FormField>
           <FormField
+            v-if="form.values.client_type !== 'openai-codex'"
             v-slot="{ componentField }"
             name="api_key"
           >
@@ -68,6 +69,12 @@
               </FormControl>
             </FormItem>
           </FormField>
+          <div
+            v-else
+            class="rounded-lg border p-3 text-sm text-muted-foreground"
+          >
+            {{ $t('provider.oauth.createHint') }}
+          </div>
           <FormField
             v-slot="{ componentField }"
             name="base_url"
@@ -161,7 +168,7 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { toast } from 'vue-sonner'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 const open = defineModel<boolean>('open')
 const { t } = useI18n()
@@ -208,11 +215,19 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 })
 
 const providerSchema = toTypedSchema(z.object({
-  api_key: z.string().min(1),
+  api_key: z.string().optional(),
   base_url: z.string().min(1),
   name: z.string().min(1),
   client_type: z.string().min(1),
   auto_import: z.boolean().optional(),
+}).superRefine((value, ctx) => {
+  if (value.client_type !== 'openai-codex' && !value.api_key?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['api_key'],
+      message: 'API key is required',
+    })
+  }
 }))
 
 const form = useForm({
@@ -223,12 +238,19 @@ const form = useForm({
   },
 })
 
+watch(() => form.values.client_type, (clientType) => {
+  if (clientType !== 'openai-codex') return
+  if (!form.values.base_url) {
+    form.setFieldValue('base_url', 'https://chatgpt.com/backend-api')
+  }
+})
+
 const createProvider = form.handleSubmit(async (value) => {
   await run(
     () => createProviderMutation(value),
     {
       fallbackMessage: t('common.saveFailed'),
-      onSuccess: () => {      
+      onSuccess: () => {
         open.value = false
         form.resetForm()
       },

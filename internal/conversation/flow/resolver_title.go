@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/db/sqlc"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -104,11 +105,19 @@ func (r *Resolver) generateTitle(ctx context.Context, model models.GetResponse, 
 		"Return ONLY the title text, nothing else.\n\n" +
 		"User: " + userSnippet
 
+	authResolver := providers.NewService(nil, r.queries, "")
+	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		r.logger.Warn("title gen: failed to resolve provider credentials", slog.Any("error", err))
+		return ""
+	}
+
 	modelCfg := models.SDKModelConfig{
-		ModelID:    model.ModelID,
-		ClientType: provider.ClientType,
-		APIKey:     provider.ApiKey,
-		BaseURL:    provider.BaseUrl,
+		ModelID:        model.ModelID,
+		ClientType:     provider.ClientType,
+		APIKey:         creds.APIKey,
+		CodexAccountID: creds.CodexAccountID,
+		BaseURL:        provider.BaseUrl,
 	}
 	sdkModel := models.NewSDKChatModel(modelCfg)
 
