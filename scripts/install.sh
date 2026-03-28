@@ -232,23 +232,27 @@ mkdir -p "$MEMOH_DATA_DIR"
 # Resolve browser tag and cores from BROWSER_CORE selection
 case "$BROWSER_CORE" in
   firefox)
-    BROWSER_TAG_SUFFIX="firefox-"
+    BROWSER_TAG_VARIANT="firefox"
     BROWSER_CORES="firefox"
     ;;
   all)
-    BROWSER_TAG_SUFFIX=""
+    BROWSER_TAG_VARIANT=""
     BROWSER_CORES="chromium,firefox"
     ;;
   *)
-    BROWSER_TAG_SUFFIX="chromium-"
+    BROWSER_TAG_VARIANT="chromium"
     BROWSER_CORES="chromium"
     ;;
 esac
 
-if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
-  BROWSER_TAG="${BROWSER_TAG_SUFFIX}${MEMOH_DOCKER_VERSION}"
+if [ -n "$BROWSER_TAG_VARIANT" ]; then
+  if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
+    BROWSER_TAG="${MEMOH_DOCKER_VERSION}-${BROWSER_TAG_VARIANT}"
+  else
+    BROWSER_TAG="${BROWSER_TAG_VARIANT}-latest"
+  fi
 else
-  BROWSER_TAG="${BROWSER_TAG_SUFFIX}latest"
+  BROWSER_TAG="${MEMOH_DOCKER_VERSION}"
 fi
 
 COMPOSE_FILES="-f docker-compose.yml"

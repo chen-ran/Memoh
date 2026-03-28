@@ -33,6 +33,7 @@ permissions:
 
 jobs:
   build:
+    name: build ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }} ${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
     strategy:
       fail-fast: false
       matrix:
@@ -159,6 +160,7 @@ jobs:
           retention-days: 1
 
   merge:
+    name: publish ${{ matrix.image }}${{ matrix.variant_label != '' && format(' ({0})', matrix.variant_label) || '' }}
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
     needs: build
@@ -167,22 +169,34 @@ jobs:
         include:
           - image: server
             artifact_key: server
-            tag_prefix: ""
+            variant_label: ""
+            raw_tag_prefix: ""
+            tag_suffix: ""
           - image: web
             artifact_key: web
-            tag_prefix: ""
+            variant_label: ""
+            raw_tag_prefix: ""
+            tag_suffix: ""
           - image: browser
             artifact_key: browser
-            tag_prefix: ""
+            variant_label: ""
+            raw_tag_prefix: ""
+            tag_suffix: ""
           - image: browser
             artifact_key: browser-chromium
-            tag_prefix: "chromium-"
+            variant_label: chromium
+            raw_tag_prefix: "chromium-"
+            tag_suffix: "-chromium"
           - image: browser
             artifact_key: browser-firefox
-            tag_prefix: "firefox-"
+            variant_label: firefox
+            raw_tag_prefix: "firefox-"
+            tag_suffix: "-firefox"
           - image: sparse
             artifact_key: sparse
-            tag_prefix: ""
+            variant_label: ""
+            raw_tag_prefix: ""
+            tag_suffix: ""
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -215,13 +229,13 @@ jobs:
             memohai/${{ matrix.image }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
-            type=raw,value=${{ matrix.tag_prefix }}dev,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ matrix.tag_prefix }}${{ github.ref_name }}-dev,enable=${{ startsWith(github.ref, 'refs/heads/v') }}
-            type=raw,value=${{ matrix.tag_prefix }}latest,enable=${{ github.event_name == 'release' || (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) }}
-            type=ref,event=pr,prefix=${{ matrix.tag_prefix }}
-            type=semver,pattern=${{ matrix.tag_prefix }}{{version}}
-            type=semver,pattern=${{ matrix.tag_prefix }}{{major}}.{{minor}}
-            type=semver,pattern=${{ matrix.tag_prefix }}{{major}}
+            type=raw,value=${{ matrix.raw_tag_prefix }}dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ matrix.raw_tag_prefix }}${{ github.ref_name }}-dev,enable=${{ startsWith(github.ref, 'refs/heads/v') }}
+            type=raw,value=${{ matrix.raw_tag_prefix }}latest,enable=${{ github.event_name == 'release' || (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) }}
+            type=ref,event=pr
+            type=semver,pattern={{version}}${{ matrix.tag_suffix }}
+            type=semver,pattern={{major}}.{{minor}}${{ matrix.tag_suffix }}
+            type=semver,pattern={{major}}${{ matrix.tag_suffix }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
