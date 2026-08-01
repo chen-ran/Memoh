@@ -59,9 +59,11 @@ changed_asset AS MATERIALIZED (
   WHERE existing.id IS NULL
      OR existing.role IS DISTINCT FROM $3
      OR existing.ordinal IS DISTINCT FROM $4
-     OR ($5 <> '' AND existing.mime IS DISTINCT FROM $5)
+     OR (COALESCE($5::text, '') <> ''
+         AND existing.mime IS DISTINCT FROM COALESCE($5::text, ''))
      OR ($6::bigint > 0 AND existing.size_bytes IS DISTINCT FROM $6)
-     OR ($7 <> '' AND existing.storage_key IS DISTINCT FROM $7)
+     OR (COALESCE($7::text, '') <> ''
+         AND existing.storage_key IS DISTINCT FROM COALESCE($7::text, ''))
      OR existing.name IS DISTINCT FROM $8
      OR existing.metadata IS DISTINCT FROM $9
 ),
@@ -90,9 +92,9 @@ upserted_asset AS (
     $3,
     $4,
     $2,
-    $5,
+    COALESCE($5::text, ''),
     $6,
-    $7,
+    COALESCE($7::text, ''),
     $8,
     $9
   FROM target_message target
@@ -116,9 +118,9 @@ type CreateMessageAssetParams struct {
 	ContentHash string      `json:"content_hash"`
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
-	Mime        interface{} `json:"mime"`
+	Mime        string      `json:"mime"`
 	SizeBytes   int64       `json:"size_bytes"`
-	StorageKey  interface{} `json:"storage_key"`
+	StorageKey  string      `json:"storage_key"`
 	Name        string      `json:"name"`
 	Metadata    []byte      `json:"metadata"`
 }

@@ -58,9 +58,11 @@ changed_asset AS MATERIALIZED (
   WHERE existing.id IS NULL
      OR existing.role IS DISTINCT FROM sqlc.arg(role)
      OR existing.ordinal IS DISTINCT FROM sqlc.arg(ordinal)
-     OR (sqlc.arg(mime) <> '' AND existing.mime IS DISTINCT FROM sqlc.arg(mime))
+     OR (COALESCE(sqlc.arg(mime)::text, '') <> ''
+         AND existing.mime IS DISTINCT FROM COALESCE(sqlc.arg(mime)::text, ''))
      OR (sqlc.arg(size_bytes)::bigint > 0 AND existing.size_bytes IS DISTINCT FROM sqlc.arg(size_bytes))
-     OR (sqlc.arg(storage_key) <> '' AND existing.storage_key IS DISTINCT FROM sqlc.arg(storage_key))
+     OR (COALESCE(sqlc.arg(storage_key)::text, '') <> ''
+         AND existing.storage_key IS DISTINCT FROM COALESCE(sqlc.arg(storage_key)::text, ''))
      OR existing.name IS DISTINCT FROM sqlc.arg(name)
      OR existing.metadata IS DISTINCT FROM sqlc.arg(metadata)
 ),
@@ -89,9 +91,9 @@ upserted_asset AS (
     sqlc.arg(role),
     sqlc.arg(ordinal),
     sqlc.arg(content_hash),
-    sqlc.arg(mime),
+    COALESCE(sqlc.arg(mime)::text, ''),
     sqlc.arg(size_bytes),
-    sqlc.arg(storage_key),
+    COALESCE(sqlc.arg(storage_key)::text, ''),
     sqlc.arg(name),
     sqlc.arg(metadata)
   FROM target_message target
