@@ -1,4 +1,4 @@
--- 0125_history_asset_metadata
+-- 0126_history_asset_metadata
 -- Remove denormalized attachment metadata from message history.
 
 ALTER TABLE bot_history_message_assets

@@ -1,4 +1,4 @@
--- 0125_history_asset_metadata
+-- 0126_history_asset_metadata
 -- Persist attachment metadata so history reads never probe runtime storage.
 
 ALTER TABLE bot_history_message_assets
