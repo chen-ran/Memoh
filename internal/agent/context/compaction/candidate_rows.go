@@ -87,9 +87,6 @@ func assetsByMessageID(rows []sqlc.ListMessageAssetsBatchRow) map[pgtype.UUID][]
 			ContentHash: strings.TrimSpace(row.ContentHash),
 			Role:        strings.TrimSpace(row.Role),
 			Ordinal:     int(row.Ordinal),
-			Mime:        strings.TrimSpace(row.Mime),
-			SizeBytes:   row.SizeBytes,
-			StorageKey:  strings.TrimSpace(row.StorageKey),
 			Name:        strings.TrimSpace(row.Name),
 			Metadata:    metadataMap(row.Metadata),
 		})

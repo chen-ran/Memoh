@@ -158,6 +158,25 @@ func TestPersistStoresMessageAssetMetadata(t *testing.T) {
 	}
 }
 
+func TestLinkAssetsStoresMessageAssetMetadata(t *testing.T) {
+	queries := &runtimeSnapshotQueries{}
+	svc := NewService(nil, queries)
+
+	err := svc.LinkAssets(context.Background(), "33333333-3333-3333-3333-333333333333", []AssetRef{{
+		ContentHash: "sha256:asset",
+		Mime:        " image/png ",
+		SizeBytes:   42,
+		StorageKey:  " ab/asset.png ",
+		Name:        "asset.png",
+	}})
+	if err != nil {
+		t.Fatalf("LinkAssets() error = %v", err)
+	}
+	if got := queries.createdAsset; got.Mime != "image/png" || got.SizeBytes != 42 || got.StorageKey != "ab/asset.png" {
+		t.Fatalf("linked asset metadata = %#v", got)
+	}
+}
+
 type assetReadQueries struct {
 	dbstore.Queries
 	rows []sqlc.ListMessageAssetsBatchRow

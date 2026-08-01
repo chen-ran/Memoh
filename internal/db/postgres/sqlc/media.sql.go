@@ -59,13 +59,8 @@ changed_asset AS MATERIALIZED (
   WHERE existing.id IS NULL
      OR existing.role IS DISTINCT FROM $3
      OR existing.ordinal IS DISTINCT FROM $4
-     OR (COALESCE($5::text, '') <> ''
-         AND existing.mime IS DISTINCT FROM COALESCE($5::text, ''))
-     OR ($6::bigint > 0 AND existing.size_bytes IS DISTINCT FROM $6)
-     OR (COALESCE($7::text, '') <> ''
-         AND existing.storage_key IS DISTINCT FROM COALESCE($7::text, ''))
-     OR existing.name IS DISTINCT FROM $8
-     OR existing.metadata IS DISTINCT FROM $9
+     OR existing.name IS DISTINCT FROM $5
+     OR existing.metadata IS DISTINCT FROM $6
 ),
 invalidated_session AS (
   UPDATE bot_sessions session
@@ -92,11 +87,11 @@ upserted_asset AS (
     $3,
     $4,
     $2,
-    COALESCE($5::text, ''),
-    $6,
     COALESCE($7::text, ''),
     $8,
-    $9
+    COALESCE($9::text, ''),
+    $5,
+    $6
   FROM target_message target
   CROSS JOIN (SELECT count(*) FROM invalidated_session) invalidation_done
   ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
@@ -118,11 +113,11 @@ type CreateMessageAssetParams struct {
 	ContentHash string      `json:"content_hash"`
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
+	Name        string      `json:"name"`
+	Metadata    []byte      `json:"metadata"`
 	Mime        string      `json:"mime"`
 	SizeBytes   int64       `json:"size_bytes"`
 	StorageKey  string      `json:"storage_key"`
-	Name        string      `json:"name"`
-	Metadata    []byte      `json:"metadata"`
 }
 
 type CreateMessageAssetRow struct {
@@ -145,11 +140,11 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		arg.ContentHash,
 		arg.Role,
 		arg.Ordinal,
+		arg.Name,
+		arg.Metadata,
 		arg.Mime,
 		arg.SizeBytes,
 		arg.StorageKey,
-		arg.Name,
-		arg.Metadata,
 	)
 	var i CreateMessageAssetRow
 	err := row.Scan(
