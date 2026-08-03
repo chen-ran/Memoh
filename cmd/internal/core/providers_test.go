@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
 	modelspkg "github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -79,6 +80,57 @@ func TestLazyLLMCompactResolvesModelWithRequestBotID(t *testing.T) {
 	if queries.fallbackLookups != 0 {
 		t.Fatalf("fallback lookups = %d, want 0", queries.fallbackLookups)
 	}
+}
+
+func TestConfigureMemoryProviderRegistryLoadsPersistedProviderOnCacheMiss(t *testing.T) {
+	providerID := mustTestUUID("44444444-4444-4444-4444-444444444444")
+	queries := &memoryProviderLazyLoadQueries{
+		provider: sqlc.MemoryProvider{
+			ID:       providerID,
+			Name:     "Persisted built-in memory provider",
+			Provider: string(memprovider.ProviderBuiltin),
+			Config:   []byte(`{"memory_mode":"graph"}`),
+		},
+	}
+	service := memprovider.NewService(slog.Default(), queries, config.Config{})
+	registry := memprovider.NewRegistry(slog.Default())
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(context.Context, string, string, map[string]any) (memprovider.Provider, error) {
+		return membuiltin.NewBuiltinProvider(slog.Default(), nil), nil
+	})
+
+	configureMemoryProviderRegistry(service, registry)
+
+	provider, err := registry.Get(context.Background(), providerID.String())
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if provider.Type() != string(memprovider.ProviderBuiltin) {
+		t.Fatalf("provider type = %q, want %q", provider.Type(), memprovider.ProviderBuiltin)
+	}
+	if queries.lookups != 1 {
+		t.Fatalf("provider lookups = %d, want 1", queries.lookups)
+	}
+
+	if _, err := registry.Get(context.Background(), providerID.String()); err != nil {
+		t.Fatalf("cached Get() error = %v", err)
+	}
+	if queries.lookups != 1 {
+		t.Fatalf("provider lookups after cached Get() = %d, want 1", queries.lookups)
+	}
+}
+
+type memoryProviderLazyLoadQueries struct {
+	dbstore.Queries
+	provider sqlc.MemoryProvider
+	lookups  int
+}
+
+func (q *memoryProviderLazyLoadQueries) GetMemoryProviderByID(_ context.Context, id pgtype.UUID) (sqlc.MemoryProvider, error) {
+	q.lookups++
+	if id != q.provider.ID {
+		return sqlc.MemoryProvider{}, errors.New("unexpected memory provider id")
+	}
+	return q.provider, nil
 }
 
 type lazyLLMTestQueries struct {
