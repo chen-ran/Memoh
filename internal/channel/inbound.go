@@ -22,11 +22,11 @@ type inboundTask struct {
 }
 
 // HandleInbound enqueues an inbound message for asynchronous processing by the worker pool.
-func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
+func (m *Manager) HandleInbound(_ context.Context, cfg ChannelConfig, msg InboundMessage) error {
 	if m.processor == nil {
 		return errors.New("inbound processor not configured")
 	}
-	m.startInboundWorkers()
+	m.startInboundWorkers() //nolint:contextcheck // The shared pool intentionally owns a request-independent lifecycle context.
 	if m.inboundCtx != nil && m.inboundCtx.Err() != nil {
 		return errors.New("inbound dispatcher stopped")
 	}
