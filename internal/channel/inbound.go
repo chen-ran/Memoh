@@ -26,7 +26,7 @@ func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	if m.processor == nil {
 		return errors.New("inbound processor not configured")
 	}
-	m.startInboundWorkers(ctx)
+	m.startInboundWorkers()
 	if m.inboundCtx != nil && m.inboundCtx.Err() != nil {
 		return errors.New("inbound dispatcher stopped")
 	}
@@ -56,10 +56,11 @@ func (m *Manager) handleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	return nil
 }
 
-func (m *Manager) startInboundWorkers(ctx context.Context) {
+func (m *Manager) startInboundWorkers() {
 	m.inboundOnce.Do(func() {
-		workerCtx := context.WithoutCancel(ctx)
-		inboundCtx, inboundCancel := context.WithCancel(workerCtx)
+		// The pool is shared by every inbound request, so it must not retain
+		// values from whichever request happened to initialize it first.
+		inboundCtx, inboundCancel := context.WithCancel(context.Background())
 		m.inboundCtx, m.inboundCancel = inboundCtx, inboundCancel
 		for i := 0; i < m.inboundWorkers; i++ {
 			go m.runInboundWorker(inboundCtx)
