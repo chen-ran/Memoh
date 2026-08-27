@@ -385,7 +385,7 @@ import type {
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
-import { persistedMessageId, structuredToolResult } from '@/store/chat-list.normalize'
+import { structuredToolResult } from '@/store/chat-list.normalize'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -406,7 +406,7 @@ const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
   editMessage: [messageId: string, text: string, done: (started: boolean) => void]
-  forkMessage: [messageId: string]
+  forkMessage: [turnId: string]
 }>()
 
 const props = defineProps<{
@@ -451,16 +451,18 @@ const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
 const isEditingUserMessage = ref(false)
 const editDraft = ref('')
 const editSubmitting = ref(false)
-const authoritativeMessageId = computed(() => persistedMessageId(props.message))
+
+// Retry, edit and fork all address a round, and a round is named by its turn
+// id — an identity the turn carries from admission onward. The message id is a
+// render identity here and would not survive the trip to the server.
+const turnId = computed(() => props.message.turnId?.trim() ?? '')
 
 function handleRetry() {
-  const messageId = authoritativeMessageId.value
-  if (messageId) props.onRetryMessage?.(messageId)
+  if (turnId.value) props.onRetryMessage?.(turnId.value)
 }
 
 function handleFork() {
-  const messageId = authoritativeMessageId.value
-  if (messageId) emit('forkMessage', messageId)
+  if (turnId.value) emit('forkMessage', turnId.value)
 }
 
 // The pre-stream "running" line picks one phrase and holds it for the turn:
@@ -589,19 +591,19 @@ const canEditUserMessage = computed(() =>
   && props.message.attachments.length === 0
   && cleanCurrentUserText.value.length > 0
   && bubbleSelf.value
-  && authoritativeMessageId.value.length > 0,
+  && turnId.value !== '',
 )
 
 const canRetryAssistantMessage = computed(() =>
   props.canRetryLatestAssistant === true
-  && authoritativeMessageId.value.length > 0,
+  && turnId.value !== '',
 )
 
 const canForkAssistantMessage = computed(() =>
   props.message.role === 'assistant'
   && !props.message.streaming
   && props.message.__optimistic !== true
-  && authoritativeMessageId.value.length > 0,
+  && turnId.value !== '',
 )
 
 const canSubmitEdit = computed(() =>
@@ -634,14 +636,9 @@ function cancelEdit() {
 }
 
 async function submitEdit() {
-  if (!canSubmitEdit.value || props.message.role !== 'user') return
+  if (!canSubmitEdit.value || props.message.role !== 'user' || !turnId.value) return
   editSubmitting.value = true
-  const messageId = authoritativeMessageId.value
-  if (!messageId) {
-    editSubmitting.value = false
-    return
-  }
-  emit('editMessage', messageId, editDraft.value.trim(), (started) => {
+  emit('editMessage', turnId.value, editDraft.value.trim(), (started) => {
     editSubmitting.value = false
     if (started) {
       isEditingUserMessage.value = false

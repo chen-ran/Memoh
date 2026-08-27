@@ -9,7 +9,6 @@ import {
   messageIdentityId,
   mergeApprovalState,
   nextId,
-  persistedMessageId,
 } from '../chat-list.normalize'
 import { upsertById } from '../chat-list.utils'
 import type {
@@ -231,13 +230,22 @@ export function createTranscriptController({
     return fetchMessages(botId, targetSessionId, { limit: PAGE_SIZE })
   }
 
+  // The oldest turn the database has actually numbered. turnPosition is that
+  // signal exactly: the visible-history view cannot return a row without one,
+  // and a live turn carries none until its settled twin arrives. Paging from
+  // messages[0] instead would hand the server a render identity whenever a
+  // live turn sits at the head of an otherwise unsettled transcript.
+  function oldestSettledTurn(): ChatMessage | undefined {
+    return messages.find(turn => turn.turnPosition !== undefined)
+  }
+
   async function loadOlderMessages(): Promise<number> {
     const bid = (currentBotId.value ?? '').trim()
     const sid = (sessionId.value ?? '').trim()
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
-    const first = messages[0]
+    const first = oldestSettledTurn()
     if (!first) return 0
-    const firstId = persistedMessageId(first)
+    const firstId = messageIdentityId(first)
     if (!firstId) return 0
 
     const generation = historyGeneration
@@ -263,7 +271,7 @@ export function createTranscriptController({
           return older.length
         }
 
-        const earliest = normalized[0] ? persistedMessageId(normalized[0]) : ''
+        const earliest = normalized[0] ? messageIdentityId(normalized[0]) : ''
         if (!earliest || earliest === cursor) {
           hasMoreOlder.value = false
           return 0
@@ -497,7 +505,8 @@ export function createTranscriptController({
       if (!next) return current ? [current] : []
       if (!current) return [next]
       const renderId = current.id
-      Object.assign(current, next, { id: renderId })
+      const settledPosition = current.turnPosition ?? next.turnPosition
+      Object.assign(current, next, { id: renderId, turnPosition: settledPosition })
       return [current]
     })
 
