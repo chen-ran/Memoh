@@ -4,6 +4,7 @@ import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
 import type { ChatAssistantTurn, ChatUserTurn, ToolCallBlock } from './types'
+import { messageIdentityId } from '../chat-list.normalize'
 
 vi.mock('@/store/user', () => ({
   useUserStore: () => ({ userInfo: { id: 'user-1' } }),
@@ -124,6 +125,56 @@ describe('chat transcript controller', () => {
 
     expect(transcript.findTurnByTurnId('turn-1', 'user')?.id).toBe('user-1')
     expect(transcript.findTurnByTurnId('turn-1', 'assistant')?.id).toBe('assistant-1')
+  })
+
+  // The originally reported failure, as state: the moment a turn ends, the
+  // round on screen is a runtime projection carrying a render id and nothing
+  // else. Retry, edit and fork have to be able to name that round, and the
+  // turn id is the only identity it has — asking it for a stored message id
+  // is what produced `load message: invalid UUID`.
+  it('addresses a round that has no stored message id yet', () => {
+    const { transcript } = makeTranscript()
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-live',
+      status: 'completed',
+      operation: null,
+      streaming: false,
+      turns: [
+        {
+          id: 'runtime:turn-live:user',
+          turn_id: 'turn-live',
+          role: 'user',
+          text: 'hi',
+          timestamp: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'runtime:turn-live:assistant',
+          turn_id: 'turn-live',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'answer' }],
+          timestamp: '2026-01-01T00:00:01.000Z',
+        },
+      ],
+    })
+
+    const userTurn = transcript.findTurnByTurnId('turn-live', 'user')!
+    const assistantTurn = transcript.findTurnByTurnId('turn-live', 'assistant')!
+
+    // What the old contract asked this round for, and could not get. The
+    // reconciliation key is the value `(serverId ?? id)` used to send: a render
+    // id, which is what reached the server as `load message: invalid UUID`.
+    expect(assistantTurn.serverId).toBeUndefined()
+    expect(assistantTurn.turnPosition).toBeUndefined()
+    expect(assistantTurn.__optimistic).toBe(false)
+    expect(messageIdentityId(assistantTurn)).toBe('runtime:turn-live:assistant')
+    expect(messageIdentityId(userTurn)).toBe('runtime:turn-live:user')
+
+    // What it can be named by instead, in both halves of the round.
+    expect(userTurn.turnId).toBe('turn-live')
+    expect(assistantTurn.turnId).toBe('turn-live')
+    expect(transcript.isLatestVisibleUserTurn(userTurn)).toBe(true)
+    expect(transcript.isLatestVisibleAssistantTurn(assistantTurn)).toBe(true)
   })
 
   // A live turn is on screen before the database has numbered it. Paging from
