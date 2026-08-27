@@ -188,6 +188,38 @@ func (s *Service) prepareEditLatestTurnOperation(ctx context.Context, sessionID,
 	return turn, nil
 }
 
+// ResolveTurnIDForMessage maps a stored message id onto the round that contains
+// it. It backs the compatibility shim for the pre-turn `message_id` spelling
+// and has no other caller: a client holds a turn id from admission onward and
+// names the round directly, while needing a stored message id is exactly what
+// used to force it to wait for the round to persist.
+//
+// Remove it, and the shim, once the compatibility window for `message_id`
+// closes. (Not marked Deprecated in the godoc sense — the shim is its intended
+// caller, so flagging that call adds noise rather than signal.)
+func (s *Service) ResolveTurnIDForMessage(ctx context.Context, sessionID, messageID string) (string, error) {
+	if s == nil || s.messageService == nil {
+		return "", errors.New("message service not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	messageID = strings.TrimSpace(messageID)
+	if sessionID == "" {
+		return "", errors.New("session id is required")
+	}
+	if messageID == "" {
+		return "", errors.New("message id is required")
+	}
+	turn, err := s.messageService.GetVisibleTurnByMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return "", fmt.Errorf("load visible turn: %w", err)
+	}
+	turnID := strings.TrimSpace(turn.ID)
+	if turnID == "" {
+		return "", errors.New("message has no visible turn")
+	}
+	return turnID, nil
+}
+
 // resolveLatestVisibleTurn answers which round the client named, from the turn
 // alone. Retry and edit can only ever address the moving tail, so "is this the
 // latest visible turn" is the entire validation; the turn then carries its own

@@ -900,7 +900,15 @@ type wsClientMessage struct {
 	InvocationID  string `json:"invocation_id,omitempty"`
 	ComposerScope string `json:"composer_scope,omitempty"`
 	// TurnID names an existing round the client wants replaced (retry, edit).
-	TurnID            string                     `json:"turn_id,omitempty"`
+	TurnID string `json:"turn_id,omitempty"`
+	// MessageID is the pre-turn spelling of TurnID.
+	//
+	// Deprecated: accepted so a client shipped against the message-id contract
+	// keeps working after a server upgrade — the desktop app is distributed on
+	// its own cadence and does not update in lockstep with the server it
+	// connects to. The server resolves it to the round that contains it.
+	// Remove once the compatibility window closes.
+	MessageID         string                     `json:"message_id,omitempty"`
 	Attachments       []json.RawMessage          `json:"attachments,omitempty"`
 	RequestedSkills   []webRequestedSkill        `json:"requested_skills,omitempty"`
 	ModelID           string                     `json:"model_id,omitempty"`
@@ -1188,6 +1196,28 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 		return fallbackBearerToken
 	}
 	return "Bearer " + signed
+}
+
+// resolveWSTargetTurnID settles which round a replacement names. A turn id is
+// the contract; a message id is the pre-turn spelling and is resolved to its
+// round here, at the transport boundary, so nothing downstream has to know two
+// ways of naming a round.
+//
+// Deprecated behaviour: the message_id branch exists only for clients shipped
+// before the turn-id contract. Remove it with the field.
+func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, sessionID, turnID, legacyMessageID string) (string, error) {
+	if turnID != "" {
+		return turnID, nil
+	}
+	legacy := strings.TrimSpace(legacyMessageID)
+	if legacy == "" {
+		return "", errors.New("turn_id is required")
+	}
+	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 func sendWSError(writer *wsWriter, ref wsTurnRef, message string) {
@@ -2310,8 +2340,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			if targetTurnID == "" {
-				sendWSError(writer, ref, "turn_id is required")
+			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
+			if resolveErr != nil {
+				sendWSError(writer, ref, resolveErr.Error())
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2376,8 +2407,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			if targetTurnID == "" {
-				sendWSError(writer, ref, "turn_id is required")
+			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
+			if resolveErr != nil {
+				sendWSError(writer, ref, resolveErr.Error())
 				continue
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)

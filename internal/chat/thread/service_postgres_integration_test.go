@@ -313,6 +313,56 @@ func TestPostgresCreateSubagentStoresForkContextAsHiddenHistory(t *testing.T) {
 	}
 }
 
+// A client shipped before the turn-id contract still names a message. It must
+// land on the same round as naming the turn directly.
+func TestPostgresForkFromAssistantTurnAcceptsTheLegacyMessageSpelling(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)), nil)
+	fork, err := svc.ForkFromAssistantTurn(ctx, ForkFromAssistantInput{
+		BotID:           postgresSessionTestBotID,
+		ThreadID:        postgresSessionTestSessionID,
+		MessageID:       postgresSessionTestAssistant2ID,
+		Title:           "Forked by message",
+		CreatedByUserID: postgresSessionTestUserID,
+	})
+	if err != nil {
+		t.Fatalf("fork by legacy message id: %v", err)
+	}
+
+	forkedFrom, ok := fork.Metadata["forked_from"].(map[string]any)
+	if !ok {
+		t.Fatalf("fork metadata missing forked_from: %#v", fork.Metadata)
+	}
+	if got := forkedFrom["message_id"]; got != postgresSessionTestAssistant2ID {
+		t.Fatalf("fork source message_id = %#v, want %s", got, postgresSessionTestAssistant2ID)
+	}
+
+	var copied int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*)
+		FROM bot_history_messages
+		WHERE session_id = $1
+	`, fork.ID).Scan(&copied); err != nil {
+		t.Fatalf("count fork messages: %v", err)
+	}
+	if copied != 4 {
+		t.Fatalf("copied %d messages, want 4 (both visible turns)", copied)
+	}
+
+	// A message that has no visible turn is refused, not silently forked.
+	if _, err := svc.ForkFromAssistantTurn(ctx, ForkFromAssistantInput{
+		BotID:     postgresSessionTestBotID,
+		ThreadID:  postgresSessionTestSessionID,
+		MessageID: postgresSessionTestHiddenAssistantID,
+		Title:     "Should Not Exist",
+	}); !errors.Is(err, ErrForkSourceNotReply) {
+		t.Fatalf("fork by hidden message error = %v, want ErrForkSourceNotReply", err)
+	}
+}
+
 func TestPostgresForkFromAssistantTurnRejectsInvalidTargetWithoutSideEffects(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresSessionTestTx(t, ctx)

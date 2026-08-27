@@ -21,11 +21,50 @@ type forkAnchorMessageService struct {
 
 type replacementOperationMessageService struct {
 	recordingMessageService
-	latest messagepkg.HistoryTurn
+	latest      messagepkg.HistoryTurn
+	turnByMsg   messagepkg.HistoryTurn
+	turnByMsgID string
 }
 
 func (s *replacementOperationMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
 	return s.latest, nil
+}
+
+func (s *replacementOperationMessageService) GetVisibleTurnByMessage(_ context.Context, _ string, messageID string) (messagepkg.HistoryTurn, error) {
+	s.turnByMsgID = messageID
+	return s.turnByMsg, nil
+}
+
+// The deprecated message-id spelling is resolved to a round at the boundary, so
+// a client shipped before the turn-id contract keeps working after an upgrade.
+func TestResolveTurnIDForMessageMapsTheLegacySpelling(t *testing.T) {
+	messages := &replacementOperationMessageService{
+		turnByMsg: messagepkg.HistoryTurn{ID: " turn-old "},
+	}
+	service := &Service{messageService: messages}
+
+	got, err := service.ResolveTurnIDForMessage(context.Background(), "session-1", " assistant-result ")
+	if err != nil {
+		t.Fatalf("resolve turn id: %v", err)
+	}
+	if got != "turn-old" {
+		t.Fatalf("turn id = %q, want turn-old", got)
+	}
+	if messages.turnByMsgID != "assistant-result" {
+		t.Fatalf("looked up message %q, want assistant-result", messages.turnByMsgID)
+	}
+
+	if _, err := service.ResolveTurnIDForMessage(context.Background(), "session-1", "  "); err == nil {
+		t.Fatal("resolve without a message id: want error")
+	}
+}
+
+func TestResolveTurnIDForMessageRejectsAMessageWithoutAVisibleTurn(t *testing.T) {
+	service := &Service{messageService: &replacementOperationMessageService{}}
+
+	if _, err := service.ResolveTurnIDForMessage(context.Background(), "session-1", "assistant-result"); err == nil {
+		t.Fatal("resolve a message with no visible turn: want error")
+	}
 }
 
 func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {

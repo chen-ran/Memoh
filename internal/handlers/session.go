@@ -137,8 +137,13 @@ type updateSessionRequest struct {
 }
 
 type forkSessionRequest struct {
-	TurnID string `json:"turn_id" validate:"required" format:"uuid"`
-	Title  string `json:"title,omitempty"`
+	TurnID string `json:"turn_id" format:"uuid"`
+	// MessageID is the pre-turn spelling of TurnID, resolved server-side to the
+	// round that contains it. Deprecated: send turn_id. A client holds a turn id
+	// from admission onward, while a stored message id exists only once the
+	// round has been persisted.
+	MessageID string `json:"message_id,omitempty" format:"uuid"`
+	Title     string `json:"title,omitempty"`
 }
 
 // CreateSession godoc
@@ -315,17 +320,23 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	turnID := strings.TrimSpace(req.TurnID)
-	if turnID == "" {
+	legacyMessageID := strings.TrimSpace(req.MessageID)
+	if turnID == "" && legacyMessageID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "turn_id is required")
 	}
-	if _, err := uuid.Parse(turnID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid turn_id")
+	if turnID != "" {
+		if _, err := uuid.Parse(turnID); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid turn_id")
+		}
+	} else if _, err := uuid.Parse(legacyMessageID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid message_id")
 	}
 
 	forked, err := h.sessionService.ForkFromAssistantTurn(c.Request().Context(), session.ForkFromAssistantInput{
 		BotID:           bot.ID,
 		ThreadID:        source.ID,
 		TurnID:          turnID,
+		MessageID:       legacyMessageID,
 		Title:           strings.TrimSpace(req.Title),
 		CreatedByUserID: channelIdentityID,
 	})
@@ -1093,7 +1104,7 @@ func sessionForkError(err error) error {
 	case errors.Is(err, session.ErrForkSourceNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "session not found")
 	case errors.Is(err, session.ErrForkSourceNotReply):
-		return echo.NewHTTPError(http.StatusConflict, "message is not a visible assistant reply")
+		return echo.NewHTTPError(http.StatusConflict, "fork source is not a visible assistant reply")
 	case errors.Is(err, session.ErrForkSourceNotChat):
 		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
 	default:

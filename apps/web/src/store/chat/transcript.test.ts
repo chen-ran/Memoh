@@ -137,6 +137,7 @@ describe('chat transcript controller', () => {
     transcript.applyRuntimeTranscript({
       runId: 'run-1',
       turnId: 'turn-live',
+      invocationId: '',
       status: 'completed',
       operation: null,
       streaming: false,

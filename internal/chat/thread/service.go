@@ -235,6 +235,7 @@ type Queries interface {
 	CreateSubagentConfig(context.Context, sqlc.CreateSubagentConfigParams) (sqlc.SubagentConfig, error)
 	CreateSubagentForkContext(context.Context, sqlc.CreateSubagentForkContextParams) (sqlc.CreateSubagentForkContextRow, error)
 	ForkSessionFromAssistantTurn(context.Context, sqlc.ForkSessionFromAssistantTurnParams) (sqlc.ForkSessionFromAssistantTurnRow, error)
+	GetVisibleHistoryTurnByMessage(context.Context, sqlc.GetVisibleHistoryTurnByMessageParams) (dbstore.HistoryTurn, error)
 	GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error)
 	GetSessionByID(context.Context, pgtype.UUID) (sqlc.BotSession, error)
 	GetSubagentConfig(context.Context, pgtype.UUID) (sqlc.SubagentConfig, error)
@@ -260,7 +261,13 @@ type ForkFromAssistantInput struct {
 	// TurnID names the round the fork inherits through. A turn is the identity
 	// a client holds while the round is still live, and the cut is turn-level
 	// anyway, so the fork point is named by turn rather than by stored message.
-	TurnID          string
+	TurnID string
+	// MessageID is the pre-turn spelling of TurnID.
+	//
+	// Deprecated: accepted so a client shipped against the message-id contract
+	// keeps working after a server upgrade. It is resolved to the round that
+	// contains it. Remove once the compatibility window closes.
+	MessageID       string
 	Title           string
 	CreatedByUserID string
 }
@@ -599,7 +606,7 @@ func (s *Service) ListSubagentForkContext(ctx context.Context, sessionID string)
 	return messages, nil
 }
 
-// ForkFromAssistantMessage creates a new chat thread containing the source
+// ForkFromAssistantTurn creates a new chat thread containing the source
 // thread's visible linear history through the selected assistant turn.
 func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssistantInput) (Thread, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
@@ -610,9 +617,9 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	pgTurnID, err := dbpkg.ParseUUID(input.TurnID)
+	pgTurnID, err := s.forkTargetTurnID(ctx, pgSessionID, input)
 	if err != nil {
-		return Thread{}, fmt.Errorf("invalid turn id: %w", err)
+		return Thread{}, err
 	}
 	pgCreatedByUserID, err := parseOptionalUUID(input.CreatedByUserID)
 	if err != nil {
@@ -675,6 +682,40 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 	s.publishThreadCreated(thread)
 	s.runThreadStartHook(context.WithoutCancel(ctx), thread)
 	return thread, nil
+}
+
+// forkTargetTurnID settles which round the fork inherits through. The turn id
+// is the contract; the message id is the pre-turn spelling and is resolved to
+// its round here, so the fork query only ever sees a turn.
+//
+// Deprecated behaviour: the message-id branch exists only for clients shipped
+// before the turn-id contract. Remove it with the field.
+func (s *Service) forkTargetTurnID(ctx context.Context, pgSessionID pgtype.UUID, input ForkFromAssistantInput) (pgtype.UUID, error) {
+	if strings.TrimSpace(input.TurnID) != "" {
+		pgTurnID, err := dbpkg.ParseUUID(input.TurnID)
+		if err != nil {
+			return pgtype.UUID{}, fmt.Errorf("invalid turn id: %w", err)
+		}
+		return pgTurnID, nil
+	}
+	pgMessageID, err := dbpkg.ParseUUID(input.MessageID)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("invalid message id: %w", err)
+	}
+	turn, err := s.queries.GetVisibleHistoryTurnByMessage(ctx, sqlc.GetVisibleHistoryTurnByMessageParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, ErrForkSourceNotReply
+		}
+		return pgtype.UUID{}, err
+	}
+	if !turn.ID.Valid {
+		return pgtype.UUID{}, ErrForkSourceNotReply
+	}
+	return turn.ID, nil
 }
 
 // publishSessionCreated emits a session_created event for the new session.
