@@ -180,7 +180,7 @@ type reasoningPolicyQueries struct {
 
 func (q *reasoningPolicyQueries) SupportsTransactions() bool { return q.transactions }
 
-func (q *reasoningPolicyQueries) InTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+func (q *reasoningPolicyQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
 	q.events = append(q.events, "transaction")
 	return fn(q)
 }

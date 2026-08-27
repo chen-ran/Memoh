@@ -40,7 +40,7 @@ type fakeQueries struct {
 
 func (f *fakeQueries) SupportsTransactions() bool { return f.transactions }
 
-func (f *fakeQueries) InTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+func (f *fakeQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
 	f.events = append(f.events, "transaction")
 	return fn(f)
 }
