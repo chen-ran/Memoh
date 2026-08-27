@@ -109,8 +109,8 @@
                       :on-open-media="galleryOpenBySrc"
                       :on-reply-click="handleReplyJump"
                       :on-retry-message="handleRetryMessage"
-                      :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
-                      :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
+                      :can-retry-latest-assistant="Boolean(latestRetryableAssistantId && latestRetryableAssistantId === persistedMessageId(msg))"
+                      :can-edit-latest-user="Boolean(latestEditableUserId && latestEditableUserId === persistedMessageId(msg))"
                       :can-fork-assistant="canForkAssistant"
                       :is-scrolling="isScrolling"
                       :is-last-message="msg.id === lastMessageId"
@@ -883,6 +883,7 @@ import {
 } from 'lucide-vue-next'
 import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
+import { isPersistedMessageId, persistedMessageId } from '@/store/chat-list.normalize'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -1108,7 +1109,7 @@ const latestRetryableAssistantId = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'assistant' && !message.streaming && !message.__optimistic) {
-      return (message.serverId ?? message.id).trim()
+      return persistedMessageId(message)
     }
   }
   return ''
@@ -1120,7 +1121,7 @@ const latestEditableUserId = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'user' && !message.streaming && !message.__optimistic) {
-      return (message.serverId ?? message.id).trim()
+      return persistedMessageId(message)
     }
   }
   return ''
@@ -3002,7 +3003,7 @@ async function handleForkSourceClick() {
 function handleForkMessage(messageId: string) {
   composerError.value = ''
   const id = messageId.trim()
-  if (!id) return
+  if (!isPersistedMessageId(id)) return
   pendingForkMessageId.value = id
   forkDialogOpen.value = true
 }
@@ -3062,8 +3063,10 @@ function handleComposerKeydown(e: KeyboardEvent) {
 
 async function handleRetryMessage(messageId: string) {
   if (composerConfigPending.value) return
+  const id = messageId.trim()
+  if (!isPersistedMessageId(id)) return
   composerError.value = ''
-  const result = await chatStore.retryLatestAssistant(messageId, {
+  const result = await chatStore.retryLatestAssistant(id, {
     target: paneTarget.value,
     modelId: overrideModelId.value,
     reasoningEffort: overrideReasoningEffort.value,
@@ -3080,9 +3083,14 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
     done?.(false)
     return
   }
+  const id = messageId.trim()
+  if (!isPersistedMessageId(id)) {
+    done?.(false)
+    return
+  }
   composerError.value = ''
   try {
-    const result = await chatStore.editLatestUser(messageId, text, {
+    const result = await chatStore.editLatestUser(id, text, {
       target: paneTarget.value,
       modelId: overrideModelId.value,
       reasoningEffort: overrideReasoningEffort.value,

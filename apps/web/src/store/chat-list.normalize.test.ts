@@ -4,7 +4,9 @@ import {
   cloneRequestedSkills,
   cloneUserInputState,
   createInvocationId,
+  isPersistedMessageId,
   isOptimisticTurn,
+  messageIdentityId,
   mergeApprovalState,
   normalizeForwardRef,
   normalizeReplyRef,
@@ -12,7 +14,7 @@ import {
   normalizeTimestamp,
   pickRawString,
   pickString,
-  serverMessageId,
+  persistedMessageId,
   skillActivationTextFromRaw,
   sortChatMessages,
   structuredToolResult,
@@ -168,9 +170,24 @@ describe('requested skills', () => {
 })
 
 describe('ids', () => {
-  it('serverMessageId prefers serverId', () => {
-    expect(serverMessageId(userTurn({ serverId: ' s1 ' } as Partial<ChatUserTurn>))).toBe('s1')
-    expect(serverMessageId(userTurn())).toBe('u1')
+  it('messageIdentityId prefers serverId but can use a render id', () => {
+    expect(messageIdentityId(userTurn({ serverId: ' s1 ' } as Partial<ChatUserTurn>))).toBe('s1')
+    expect(messageIdentityId(userTurn())).toBe('u1')
+  })
+
+  it('persistedMessageId only returns an authoritative database UUID', () => {
+    const settledId = '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e'
+    const adoptedId = '018f47f2-8bc1-7a3d-91b2-b73a7b925b1f'
+
+    expect(persistedMessageId(userTurn({ id: settledId }))).toBe(settledId)
+    expect(persistedMessageId(userTurn({
+      id: '1787820846874-502',
+      serverId: ` ${adoptedId} `,
+    }))).toBe(adoptedId)
+    expect(persistedMessageId(userTurn({ id: '1787820846874-502' }))).toBe('')
+    expect(persistedMessageId(userTurn({ id: 'runtime:018f47f2-8bc1-7a3d-91b2-b73a7b925b1e:user' }))).toBe('')
+    expect(isPersistedMessageId(` ${settledId} `)).toBe(true)
+    expect(isPersistedMessageId('1787820846874-502')).toBe(false)
   })
 
   it('createInvocationId yields distinct non-empty ids', () => {

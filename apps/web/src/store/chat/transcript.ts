@@ -6,9 +6,10 @@ import type {
   UITurn,
 } from '@/composables/api/useChat.types'
 import {
+  messageIdentityId,
   mergeApprovalState,
   nextId,
-  serverMessageId,
+  persistedMessageId,
 } from '../chat-list.normalize'
 import { upsertById } from '../chat-list.utils'
 import type {
@@ -236,7 +237,7 @@ export function createTranscriptController({
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
     const first = messages[0]
     if (!first) return 0
-    const firstId = serverMessageId(first)
+    const firstId = persistedMessageId(first)
     if (!firstId) return 0
 
     const generation = historyGeneration
@@ -262,7 +263,7 @@ export function createTranscriptController({
           return older.length
         }
 
-        const earliest = normalized[0] ? serverMessageId(normalized[0]) : ''
+        const earliest = normalized[0] ? persistedMessageId(normalized[0]) : ''
         if (!earliest || earliest === cursor) {
           hasMoreOlder.value = false
           return 0
@@ -368,9 +369,9 @@ export function createTranscriptController({
   function findMessageIndexForReplacement(turn: ChatMessage): number {
     const referenceIndex = messages.indexOf(turn)
     if (referenceIndex >= 0) return referenceIndex
-    const id = serverMessageId(turn)
+    const id = messageIdentityId(turn)
     if (!id) return -1
-    return messages.findIndex(message => serverMessageId(message) === id)
+    return messages.findIndex(message => messageIdentityId(message) === id)
   }
 
   function replaceTailFromTurn(turn: ChatMessage, replacements: ChatMessage[]): ChatMessage[] {
@@ -502,7 +503,7 @@ export function createTranscriptController({
 
     const operationAnchor = slice.operation?.replace_from_message_id?.trim() ?? ''
     const anchor = operationAnchor
-      ? messages.find(turn => serverMessageId(turn) === operationAnchor)
+      ? messages.find(turn => messageIdentityId(turn) === operationAnchor)
       : undefined
     if (anchor) {
       replaceTailFromTurn(anchor, resolved)

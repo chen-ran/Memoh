@@ -57,6 +57,8 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+const persistedUserId = '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e'
+
 function approvalMessage(status = 'pending'): UIMessage {
   return {
     id: 1,
@@ -533,7 +535,7 @@ describe('chat transcript controller', () => {
 
   it('drops an older-page response that resolves after the active session changes', async () => {
     const { transcript, sessionId, fetchMessages } = makeTranscript()
-    transcript.replaceHistoryView([rawUser('session-1-user')], 'session-1')
+    transcript.replaceHistoryView([rawUser(persistedUserId)], 'session-1')
     const pending = deferred<UITurn[]>()
     fetchMessages.mockReturnValueOnce(pending.promise)
 
@@ -546,6 +548,23 @@ describe('chat transcript controller', () => {
     expect(await loading).toBe(0)
     expect(transcript.messages.map(turn => turn.id)).toEqual(['session-2-user'])
     expect(transcript.loadingOlder.value).toBe(false)
+  })
+
+  it('waits for a persisted UUID before loading older messages', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceHistoryView([rawUser('1787820846874-502')], 'session-1')
+
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).not.toHaveBeenCalled()
+
+    transcript.messages[0]!.serverId = persistedUserId
+    fetchMessages.mockResolvedValueOnce([])
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).toHaveBeenCalledWith('bot-1', 'session-1', {
+      limit: 30,
+      beforeMessageId: persistedUserId,
+    })
+    expect(transcript.hasMoreOlder.value).toBe(false)
   })
 
   it('drops a locate response that resolves after the active session changes', async () => {

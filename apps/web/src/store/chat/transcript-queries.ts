@@ -1,4 +1,4 @@
-import { serverMessageId } from '../chat-list.normalize'
+import { messageIdentityId } from '../chat-list.normalize'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn } from './types'
 
 export function createTranscriptQueries(messages: ChatMessage[]) {
@@ -13,7 +13,7 @@ export function createTranscriptQueries(messages: ChatMessage[]) {
   function findTurnByServerId(messageId: string): ChatMessage | null {
     const id = messageId.trim()
     if (!id) return null
-    return messages.find(turn => serverMessageId(turn) === id) ?? null
+    return messages.find(turn => messageIdentityId(turn) === id) ?? null
   }
 
   function latestVisibleTurn(role: 'user'): ChatUserTurn | null
@@ -29,13 +29,13 @@ export function createTranscriptQueries(messages: ChatMessage[]) {
   function isLatestVisibleUserTurn(turn: ChatMessage): turn is ChatUserTurn {
     if (turn.role !== 'user') return false
     const latest = latestVisibleTurn('user')
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+    return Boolean(latest && messageIdentityId(latest) === messageIdentityId(turn))
   }
 
   function isLatestVisibleAssistantTurn(turn: ChatMessage): turn is ChatAssistantTurn {
     if (turn.role !== 'assistant') return false
     const latest = latestVisibleTurn('assistant')
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+    return Boolean(latest && messageIdentityId(latest) === messageIdentityId(turn))
   }
 
   return {

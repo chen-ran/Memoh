@@ -307,7 +307,7 @@
           align="start"
           :persistent="isLastMessage"
           :streaming="message.streaming"
-          :on-retry="canRetryLatestAssistant ? handleRetry : undefined"
+          :on-retry="canRetryAssistantMessage ? handleRetry : undefined"
           :on-fork="canForkAssistantMessage && canForkAssistant ? handleFork : undefined"
         />
       </div>
@@ -385,7 +385,7 @@ import type {
   ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
-import { structuredToolResult } from '@/store/chat-list.normalize'
+import { persistedMessageId, structuredToolResult } from '@/store/chat-list.normalize'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -451,14 +451,15 @@ const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
 const isEditingUserMessage = ref(false)
 const editDraft = ref('')
 const editSubmitting = ref(false)
+const authoritativeMessageId = computed(() => persistedMessageId(props.message))
 
 function handleRetry() {
-  const messageId = (props.message.serverId ?? props.message.id).trim()
+  const messageId = authoritativeMessageId.value
   if (messageId) props.onRetryMessage?.(messageId)
 }
 
 function handleFork() {
-  const messageId = (props.message.serverId ?? props.message.id).trim()
+  const messageId = authoritativeMessageId.value
   if (messageId) emit('forkMessage', messageId)
 }
 
@@ -587,13 +588,20 @@ const canEditUserMessage = computed(() =>
   && props.canEditLatestUser === true
   && props.message.attachments.length === 0
   && cleanCurrentUserText.value.length > 0
-  && bubbleSelf.value,
+  && bubbleSelf.value
+  && authoritativeMessageId.value.length > 0,
+)
+
+const canRetryAssistantMessage = computed(() =>
+  props.canRetryLatestAssistant === true
+  && authoritativeMessageId.value.length > 0,
 )
 
 const canForkAssistantMessage = computed(() =>
   props.message.role === 'assistant'
   && !props.message.streaming
-  && props.message.__optimistic !== true,
+  && props.message.__optimistic !== true
+  && authoritativeMessageId.value.length > 0,
 )
 
 const canSubmitEdit = computed(() =>
@@ -628,7 +636,11 @@ function cancelEdit() {
 async function submitEdit() {
   if (!canSubmitEdit.value || props.message.role !== 'user') return
   editSubmitting.value = true
-  const messageId = (props.message.serverId ?? props.message.id).trim()
+  const messageId = authoritativeMessageId.value
+  if (!messageId) {
+    editSubmitting.value = false
+    return
+  }
   emit('editMessage', messageId, editDraft.value.trim(), (started) => {
     editSubmitting.value = false
     if (started) {

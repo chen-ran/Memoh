@@ -4535,7 +4535,7 @@ describe('chat-list store', () => {
       // Initial page == PAGE_SIZE so hasMoreOlder is true after refresh; the
       // older fetch then returns empty to simulate end-of-history.
       const initialPage = Array.from({ length: 30 }, (_, idx) => ({
-        id: `msg-${idx}`,
+        id: `00000000-0000-4000-8000-${String(idx).padStart(12, '0')}`,
         role: 'user' as const,
         text: 'hi',
         attachments: [],

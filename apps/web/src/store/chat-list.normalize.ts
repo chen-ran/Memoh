@@ -215,8 +215,27 @@ export function cloneRequestedSkills(items: RequestedSkillSelection[]): Requeste
   return items.map(item => ({ ...item }))
 }
 
-export function serverMessageId(turn: ChatMessage): string {
+// This identity is allowed to fall back to the render id because reconciliation
+// must still find optimistic/runtime turns before their settled twin arrives.
+// Never send it to a persistence API; the fallback may be a client-only id.
+export function messageIdentityId(turn: ChatMessage): string {
   return (turn.serverId ?? turn.id).trim()
+}
+
+const persistedMessageIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isPersistedMessageId(value: string | null | undefined): boolean {
+  return persistedMessageIdPattern.test(value?.trim() ?? '')
+}
+
+// REST history returns database UUIDs in `id`. Once a live/runtime turn adopts
+// that settled twin's render identity, the database UUID moves to `serverId`.
+// Everything else is display identity and must not cross a persistence boundary.
+export function persistedMessageId(turn: ChatMessage): string {
+  const candidates = [turn.serverId, turn.id]
+  return candidates
+    .map(value => value?.trim() ?? '')
+    .find(isPersistedMessageId) ?? ''
 }
 
 export function hasUserAttachments(turn: ChatMessage): turn is ChatUserTurn {
