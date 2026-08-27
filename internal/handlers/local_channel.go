@@ -874,13 +874,24 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
-// wsClientMessage carries the two identifiers a client is allowed to name, and
-// they are not interchangeable. invocation_id is minted by the client and names
-// an *intent*: it is the idempotency key for starting a turn, so a redelivered
-// send resolves to the run it already started instead of a second one. run_id is
-// minted by the server and names a *run*: it is the only way to address work
-// that already exists, which is why abort and decision responses carry it. A
-// client can never name a run it has not been told about.
+// wsClientMessage carries the three identifiers a client is allowed to name,
+// and they are not interchangeable.
+//
+// invocation_id is minted by the client and names an *intent*: it is the
+// idempotency key for starting a turn, so a redelivered send resolves to the
+// run it already started instead of a second one.
+//
+// run_id is minted by the server and names a *run*: it is the only way to
+// address work that is executing, which is why abort and decision responses
+// carry it.
+//
+// turn_id is minted by the server at admission and names a *round*: it is how
+// a client addresses a round it wants replaced. It is published while the run
+// is still streaming, which is what separates it from a stored message id —
+// that only exists once the round has been persisted, so a client that had to
+// name one could not act on the round it is looking at.
+//
+// A client can never name a run or a turn it has not been told about.
 type wsClientMessage struct {
 	Type          string `json:"type"`
 	RunID         string `json:"run_id,omitempty"`
@@ -888,10 +899,7 @@ type wsClientMessage struct {
 	SessionID     string `json:"session_id,omitempty"`
 	InvocationID  string `json:"invocation_id,omitempty"`
 	ComposerScope string `json:"composer_scope,omitempty"`
-	// TurnID names an existing turn the client wants replaced (retry, edit).
-	// It is a turn rather than a message because the client holds a turn id
-	// from admission onward, while a stored message id only exists once the
-	// round has been persisted.
+	// TurnID names an existing round the client wants replaced (retry, edit).
 	TurnID            string                     `json:"turn_id,omitempty"`
 	Attachments       []json.RawMessage          `json:"attachments,omitempty"`
 	RequestedSkills   []webRequestedSkill        `json:"requested_skills,omitempty"`
