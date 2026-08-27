@@ -1203,6 +1203,14 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 // round here, at the transport boundary, so nothing downstream has to know two
 // ways of naming a round.
 //
+// It reads session history, so every caller MUST authorize the session first.
+// Resolving before that would answer "does this message id belong to this
+// session" for a caller who cannot read the session at all, which is a
+// cross-session existence oracle even though no write follows it.
+//
+// The storage error is deliberately not returned: it names rows, and the
+// caller only needs to know that the id did not resolve. The cause is logged.
+//
 // Deprecated behaviour: the message_id branch exists only for clients shipped
 // before the turn-id contract. Remove it with the field.
 func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, sessionID, turnID, legacyMessageID string) (string, error) {
@@ -1215,7 +1223,11 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
-		return "", err
+		h.logger.Warn("resolve deprecated message_id failed",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err),
+		)
+		return "", errors.New("message_id does not name a turn in this session")
 	}
 	return resolved, nil
 }
@@ -2340,11 +2352,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
-			if resolveErr != nil {
-				sendWSError(writer, ref, resolveErr.Error())
-				continue
-			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
 				sendWSError(writer, ref, wsErrorMessage(err))
 				continue
@@ -2358,6 +2365,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					sendWSError(writer, ref, err.Error())
 					continue
 				}
+			}
+			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
+			if resolveErr != nil {
+				sendWSError(writer, ref, resolveErr.Error())
+				continue
 			}
 
 			retrySubmission := wsSubmission{
@@ -2407,11 +2419,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
-			if resolveErr != nil {
-				sendWSError(writer, ref, resolveErr.Error())
-				continue
-			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
 			if attachmentErr != nil {
 				code := slashErrorCode(attachmentErr)
@@ -2438,6 +2445,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					sendWSError(writer, ref, err.Error())
 					continue
 				}
+			}
+			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
+			if resolveErr != nil {
+				sendWSError(writer, ref, resolveErr.Error())
+				continue
 			}
 
 			editSubmission := wsSubmission{
