@@ -75,7 +75,7 @@ func TestSessionRunFinishingMigrationRoundTrip(t *testing.T) {
 		t.Fatalf("parallel active run error = %v, want unique violation", err)
 	}
 
-	stepDown(t, dsn, 5)
+	stepDown(t, dsn, 1)
 	var state string
 	if err := conn.QueryRow(ctx, `SELECT state FROM session_runs WHERE run_id = $1`, runID).Scan(&state); err != nil {
 		t.Fatalf("load downgraded run: %v", err)
@@ -100,7 +100,7 @@ func TestSessionRunFinishingMigrationRoundTrip(t *testing.T) {
 		t.Fatalf("downgraded active index still includes finishing: %s", predicate)
 	}
 
-	stepUp(t, dsn, 5)
+	stepUp(t, dsn, 1)
 	if predicate := sessionRunIndexPredicate(t, ctx, conn, "session_runs_single_active"); !strings.Contains(predicate, "finishing") {
 		t.Fatalf("upgraded active index excludes finishing: %s", predicate)
 	}

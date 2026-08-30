@@ -22,9 +22,8 @@ ALTER TABLE public.session_runs
         'completed', 'aborted', 'failed', 'lost'
     ));
 
--- At this point 0144-0147 have already restored canonical index names while
--- retaining the finishing predicate. Replace them transactionally only after
--- every finishing row above has become terminal.
+-- Replace the partial indexes only after every finishing row above has become
+-- terminal, restoring the pre-0143 admission and recovery predicates.
 DROP INDEX IF EXISTS public.session_runs_single_active;
 CREATE UNIQUE INDEX session_runs_single_active
     ON public.session_runs (team_id, session_id)

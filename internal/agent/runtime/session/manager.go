@@ -63,6 +63,10 @@ type Manager struct {
 	commandExecutions      map[string]chan struct{}
 	admittedCommands       map[string]struct{}
 	localCommandResults    map[string]localCommandResult
+	// localFinishHandoffs are memory-backend runs whose owner retry budget was
+	// exhausted. Memory has no lease index, so the shared reaper loop retries
+	// these durable conclusions without retaining one goroutine per run.
+	localFinishHandoffs map[runControlKey]RunHandle
 
 	commandCancel       context.CancelFunc
 	commandDone         chan struct{}
@@ -207,6 +211,9 @@ type Options struct {
 	Logger                 *slog.Logger
 	EpochGenerator         func() string
 	RunGenerationGenerator func() string
+	// durableFinishRetryBudget is a test hook. Production uses a one-minute
+	// budget before lease expiry hands convergence to the reaper.
+	durableFinishRetryBudget time.Duration
 	// ScanBatchSize and MaxScanBatchesPerTick exist so tests can watch recovery
 	// page rather than to be tuned in production; both default to package
 	// constants.
@@ -255,8 +262,12 @@ func NewManager(backend Backend, opts Options) *Manager {
 	if newGeneration == nil {
 		newGeneration = uuid.NewString
 	}
+	tune := newTuning(leaseTTL, opts.BackendLossGrace, opts.ScanBatchSize, opts.MaxScanBatchesPerTick)
+	if opts.durableFinishRetryBudget > 0 {
+		tune.durableFinishRetryBudget = opts.durableFinishRetryBudget
+	}
 	return &Manager{
-		tuning:                 newTuning(leaseTTL, opts.BackendLossGrace, opts.ScanBatchSize, opts.MaxScanBatchesPerTick),
+		tuning:                 tune,
 		backend:                backend,
 		distributed:            distributed,
 		liveness:               liveness,
@@ -276,6 +287,7 @@ func NewManager(backend Backend, opts Options) *Manager {
 		commandExecutions:      make(map[string]chan struct{}),
 		admittedCommands:       make(map[string]struct{}),
 		localCommandResults:    make(map[string]localCommandResult),
+		localFinishHandoffs:    make(map[runControlKey]RunHandle),
 		closeCh:                make(chan struct{}),
 		shutdownDone:           make(chan struct{}),
 	}
@@ -362,13 +374,23 @@ func (m *Manager) observeTerminalRun(ctx context.Context, run TerminalRun) {
 	if m == nil || run.RunID == "" {
 		return
 	}
-	m.reconcileTerminalLive(context.WithoutCancel(ctx), run)
 	m.mu.Lock()
 	observer := m.terminalObserver
 	m.mu.Unlock()
 	if observer != nil {
 		observer(context.WithoutCancel(ctx), run)
 	}
+}
+
+// reconcileAndObserveTerminalRun is reserved for recovery paths where a
+// durable terminal commit may still have a live Redis projection. The owner
+// happy path already releases that projection before observation.
+func (m *Manager) reconcileAndObserveTerminalRun(ctx context.Context, run TerminalRun) {
+	if m == nil || run.RunID == "" {
+		return
+	}
+	m.reconcileTerminalLive(context.WithoutCancel(ctx), run)
+	m.observeTerminalRun(ctx, run)
 }
 
 // reconcileTerminalLive repairs the Redis side of a terminal commit that
@@ -433,13 +455,76 @@ func (m *Manager) reconcileTerminalRuns(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
+	var errs []error
+	if err := m.reconcileLocalFinishHandoffs(context.WithoutCancel(ctx)); err != nil {
+		errs = append(errs, err)
+	}
 	m.mu.Lock()
 	reconciler := m.terminalReconciler
 	m.mu.Unlock()
-	if reconciler == nil {
+	if reconciler != nil {
+		if err := reconciler(context.WithoutCancel(ctx)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) handoffLocalDurableFinish(handle RunHandle) {
+	if m == nil || m.distributed != nil {
+		return
+	}
+	handle = handle.normalized()
+	if !handle.valid() {
+		return
+	}
+	m.mu.Lock()
+	m.localFinishHandoffs[scopedRunControlKey(handle.BotID, handle.SessionID, handle.RunID)] = handle
+	m.mu.Unlock()
+}
+
+// reconcileLocalFinishHandoffs gives the memory backend the same bounded-owner
+// behavior Redis gets from lease expiry. There is no lease index in memory, so
+// the elected local reaper retries the abandoned durable transition directly.
+// A prepared outcome still wins over the lost fallback in Finalize.
+func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
+	if m == nil || m.distributed != nil {
 		return nil
 	}
-	return reconciler(context.WithoutCancel(ctx))
+	m.mu.Lock()
+	handles := make([]RunHandle, 0, len(m.localFinishHandoffs))
+	for _, handle := range m.localFinishHandoffs {
+		handles = append(handles, handle)
+	}
+	m.mu.Unlock()
+
+	var errs []error
+	for _, handle := range handles {
+		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, runErrorOwnerLeaseExpired, "")
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		status := liveRunStatus(ledger.State(terminal.State))
+		changed, liveErr := m.finishRunState(ctx, handle, status, terminal.ErrorCode, terminal.ErrorMessage)
+		if liveErr != nil && !errors.Is(liveErr, ErrRunOwnershipLost) {
+			errs = append(errs, liveErr)
+			continue
+		}
+		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed {
+			errs = append(errs, liveErr)
+			continue
+		}
+		m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
+		m.observeTerminalRun(ctx, terminal)
+		key := scopedRunControlKey(handle.BotID, handle.SessionID, handle.RunID)
+		m.mu.Lock()
+		if current, ok := m.localFinishHandoffs[key]; ok && current.Generation == handle.Generation && current.FencingToken == handle.FencingToken {
+			delete(m.localFinishHandoffs, key)
+		}
+		m.mu.Unlock()
+	}
+	return errors.Join(errs...)
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -570,7 +655,7 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	}
 	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
-	reaper.SetTerminalObserver(m.observeTerminalRun)
+	reaper.SetTerminalObserver(m.reconcileAndObserveTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
 	if err := reaper.Start(ctx); err != nil {
 		return err
@@ -1114,9 +1199,9 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	)
 	if err != nil {
 		if errors.Is(err, ErrRunOwnershipLost) && prepared.State.Terminal() {
-			m.observeTerminalRun(ctx, terminalRunFromLedger(prepared))
+			m.reconcileAndObserveTerminalRun(ctx, terminalRunFromLedger(prepared))
 			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
-		} else if !errors.Is(err, ErrRunOwnershipLost) {
+		} else if !errors.Is(err, ErrRunOwnershipLost) && !errors.Is(err, errInvalidOwnerTerminalState) {
 			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
 		}
 		return err
@@ -1146,7 +1231,7 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			// release shared state, but it must stop its stale local control and
 			// lease renewal before the authoritative outcome is observed.
 			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
-		} else if !errors.Is(err, ErrRunOwnershipLost) {
+		} else if !errors.Is(err, ErrRunOwnershipLost) && !errors.Is(err, errInvalidOwnerTerminalState) {
 			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
 		}
 		// The lease is deliberately left alone: it is the only pointer the
@@ -1197,18 +1282,35 @@ func (m *Manager) retryDurableFinish(
 	ctrl *runControl,
 	status, errorCode, message string,
 ) {
+	retryCtx, cancel := context.WithTimeout(ctx, m.durableFinishRetryBudget)
+	defer cancel()
 	delay := 100 * time.Millisecond
 	for {
+		timer := time.NewTimer(delay)
 		select {
 		case <-m.closeCh:
+			timer.Stop()
 			return
-		case <-time.After(delay):
+		case <-retryCtx.Done():
+			timer.Stop()
+			if errors.Is(retryCtx.Err(), context.DeadlineExceeded) {
+				m.logger.Warn("durable runtime finish retry budget exhausted; handing convergence to reaper",
+					slog.String("run_id", ctrl.runID),
+					slog.Duration("retry_budget", m.durableFinishRetryBudget))
+				m.forgetLocalControlForHandle(context.WithoutCancel(ctx), ctrl.handle())
+				m.handoffLocalDurableFinish(ctrl.handle())
+			}
+			return
+		case <-timer.C:
 		}
 		if m.localControlForHandle(ctrl.handle()) != ctrl {
 			return
 		}
-		err := m.finishRun(ctx, ctrl.handle(), status, errorCode, message)
+		err := m.finishRun(retryCtx, ctrl.handle(), status, errorCode, message)
 		if err == nil {
+			return
+		}
+		if errors.Is(err, errInvalidOwnerTerminalState) {
 			return
 		}
 		if errors.Is(err, ErrRunOwnershipLost) || errors.Is(err, ErrManagerClosed) {
@@ -1510,7 +1612,19 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}
 	terminalProposal, err := m.prepareAgentTerminalEvent(ctx, handle, event)
 	if err != nil {
-		return messages, err
+		if errors.Is(err, ErrRunOwnershipLost) {
+			return messages, err
+		}
+		// The output persistence barrier has already succeeded before this event
+		// reaches the manager. If PostgreSQL cannot record the crash-recovery
+		// proposal, keep the live run active and publish the event; FinishRun will
+		// retry the same durable transition, while a crash before then follows the
+		// documented running -> lost recovery path.
+		m.logger.Warn("prepare agent terminal proposal failed; deferring durable outcome to finish",
+			slog.Any("error", err),
+			slog.String("run_id", handle.RunID),
+			slog.String("event_type", string(event.Type)))
+		terminalProposal = agentTerminalProposal{}
 	}
 
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {

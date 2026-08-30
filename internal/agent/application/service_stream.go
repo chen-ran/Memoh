@@ -361,9 +361,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			}
 			if event.IsTerminal() && !stored && !runOwnershipLost(streamCtx) && terminalPersistErr == nil {
 				switch {
-				case event.Type == native.EventAgentAbort && !hasVisibleOutput:
-					// Cancellation before any visible assistant output has no output
-					// row to persist. The admitted user message is already durable.
+				case !hasVisibleOutput:
+					// A terminal event before any visible assistant output has no
+					// output row to persist. The admitted user message is already
+					// durable for both clean completion and cancellation.
 					stored = true
 				case stepCommitter != nil:
 					if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
@@ -710,9 +711,10 @@ func (s *Service) streamChatWSResultWithHooks(
 		}
 		if event.IsTerminal() && !stored && !runOwnershipLost(ctx) && terminalPersistErr == nil {
 			switch {
-			case event.Type == native.EventAgentAbort && !hasVisibleOutput:
-				// Cancellation before any visible assistant output has no output
-				// row to persist. The admitted user message is already durable.
+			case !hasVisibleOutput:
+				// A terminal event before any visible assistant output has no
+				// output row to persist. The admitted user message is already
+				// durable for both clean completion and cancellation.
 				stored = true
 			case stepCommitter != nil:
 				if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {

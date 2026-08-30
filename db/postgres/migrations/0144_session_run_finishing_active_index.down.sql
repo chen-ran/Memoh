@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY IF EXISTS public.session_runs_single_active_with_finishing;

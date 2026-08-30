@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY IF EXISTS public.idx_session_runs_recovery_with_finishing;

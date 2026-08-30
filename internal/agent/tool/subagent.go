@@ -1645,7 +1645,14 @@ func (p *SpawnProvider) persistMessages(
 		}
 		content, err := historyfrag.MarshalStoredSDKMessage(msg)
 		if err != nil {
-			return fmt.Errorf("marshal subagent message: %w", err)
+			// A malformed SDK message is a deterministic codec defect: retrying
+			// the whole attempt would reproduce it and discard every later valid
+			// message. Preserve the legacy skip behavior, but make the defect
+			// observable. Actual storage failures below remain authoritative.
+			p.logger.Warn("marshal subagent message failed; skipping message",
+				slog.Any("error", err),
+				slog.Int("message_index", i))
+			continue
 		}
 		var usage json.RawMessage
 		if msg.Usage != nil {

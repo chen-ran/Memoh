@@ -327,7 +327,7 @@ func runRedisLeaseIndexContract(t *testing.T, redisURL string) {
 		}
 		manager := NewManager(finishingBackend, Options{OwnerID: ref.OwnerID})
 		reaper := newTestReaperWithLiveness(t, runs, finishingBackend, generation)
-		reaper.SetTerminalObserver(manager.observeTerminalRun)
+		reaper.SetTerminalObserver(manager.reconcileAndObserveTerminalRun)
 
 		reaper.tick(ctx)
 

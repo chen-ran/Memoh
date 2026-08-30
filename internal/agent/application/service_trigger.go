@@ -318,6 +318,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 	var (
 		lastSnapshot       terminalSnapshot
 		hasSnapshot        bool
+		terminalSeen       bool
 		hasVisibleOutput   bool
 		stored             bool
 		terminalAborted    bool
@@ -325,6 +326,9 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		streamErr          error
 	)
 	for event := range events {
+		if event.IsTerminal() {
+			terminalSeen = true
+		}
 		if idle != nil {
 			idle.Reset()
 			if event.Type == native.EventToolCallStart {
@@ -412,7 +416,9 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		}
 		if event.IsTerminal() && !stored && !runOwnershipLost(ctx) && terminalPersistErr == nil {
 			switch {
-			case event.Type == native.EventAgentAbort && !hasVisibleOutput:
+			case !hasVisibleOutput:
+				// A terminal event before visible assistant output has no output
+				// row to persist; the admitted user message is already durable.
 				stored = true
 			case stepCommitter != nil:
 				if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
@@ -474,7 +480,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			}
 		}
 		return schedule.TriggerResult{}, streamErr
-	case !hasSnapshot:
+	case !terminalSeen:
 		return schedule.TriggerResult{}, errors.New("schedule run ended without a terminal event")
 	}
 

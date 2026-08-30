@@ -2,12 +2,15 @@ package sessionruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
+
+var errInvalidOwnerTerminalState = errors.New("session runtime: invalid owner terminal state")
 
 // prepareLedgerFinish makes the proposed owner outcome durable while the run
 // remains active. The reaper may later pass StateLost to Finalize, but the
@@ -21,6 +24,12 @@ func (m *Manager) prepareLedgerFinish(
 	allowWaitingDecision bool,
 ) (ledger.Run, error) {
 	state := terminalLedgerState(status, errorCode, message)
+	// Lost is a reaper-only conclusion: an owner cannot authoritatively claim
+	// that it disappeared. Reject it at the persistence boundary so a future
+	// caller cannot turn a deterministic misuse into an endless durable retry.
+	if state == ledger.StateLost || !state.Terminal() {
+		return ledger.Run{}, fmt.Errorf("%w: %q", errInvalidOwnerTerminalState, state)
+	}
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return ledger.Run{
 			State:                ledger.StateFinishing,

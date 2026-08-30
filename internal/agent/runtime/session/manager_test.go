@@ -100,6 +100,17 @@ type closeErrorBackend struct {
 	err error
 }
 
+type runRefLoadCountingBackend struct {
+	DistributedBackend
+	LivenessBackend
+	loads atomic.Int32
+}
+
+func (b *runRefLoadCountingBackend) LoadRunRef(ctx context.Context, key Key, runID string) (RunRef, bool, error) {
+	b.loads.Add(1)
+	return b.DistributedBackend.LoadRunRef(ctx, key, runID)
+}
+
 func (b closeErrorBackend) Close() error {
 	return b.err
 }
@@ -1599,6 +1610,12 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 	t.Run("does not retry finish after ownership loss", func(t *testing.T) {
 		runManagerDoesNotRetryFinishAfterOwnershipLoss(t, suite)
 	})
+	t.Run("hands exhausted durable finish retries to the reaper", func(t *testing.T) {
+		runRuntimeManagerHandsExhaustedDurableFinishToReaper(t, suite)
+	})
+	t.Run("does not reconcile released live state on owner happy path", func(t *testing.T) {
+		runRuntimeManagerSkipsHappyPathTerminalReconciliation(t, suite)
+	})
 	t.Run("close waits for run admission and cancels control", func(t *testing.T) {
 		runManagerCloseWaitsForStartRunAndCancelsControl(t, suite)
 	})
@@ -1629,6 +1646,129 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 	t.Run("expired snapshot cleanup cannot cancel a reused stream generation", func(t *testing.T) {
 		runRuntimeManagerExpiredCleanupScopesLocalControlToGeneration(t, suite)
 	})
+}
+
+func runRuntimeManagerSkipsHappyPathTerminalReconciliation(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+	rawBackend := suite.newBackend(t)
+	liveness, ok := rawBackend.(LivenessBackend)
+	if !ok {
+		t.Fatal("distributed backend does not expose liveness")
+	}
+	backend := &runRefLoadCountingBackend{DistributedBackend: rawBackend, LivenessBackend: liveness}
+	manager := NewManager(backend, Options{
+		OwnerID:       "owner-terminal-observer-cost",
+		StateTTL:      time.Minute,
+		OwnerLeaseTTL: time.Second,
+		Ledger:        newFakeLedger(),
+		Fence:         &fakeFence{},
+	})
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	admission, err := manager.Admit(context.Background(), AdmitInput{
+		BotID: testBotID, SessionID: "session-terminal-observer-cost",
+		InvocationID: "inv-terminal-observer-cost",
+		Payload:      []byte(`{"text":"hi"}`),
+		Execution: Execution{
+			Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+				return RunAdmissionView{}, nil
+			},
+			AbortCh: make(chan struct{}, 1), Cancel: func() {}, InjectCh: make(chan turn.InjectMessage, 1),
+		},
+	})
+	if err != nil {
+		t.Fatalf("admit run: %v", err)
+	}
+	loadsBeforeFinish := backend.loads.Load()
+	if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	if got := backend.loads.Load(); got != loadsBeforeFinish {
+		t.Fatalf("LoadRunRef calls during owner happy-path finish = %d, want 0", got-loadsBeforeFinish)
+	}
+}
+
+func runRuntimeManagerHandsExhaustedDurableFinishToReaper(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+	for _, phase := range []string{"prepare", "finalize"} {
+		phase := phase
+		t.Run(phase, func(t *testing.T) {
+			const (
+				leaseTTL = 150 * time.Millisecond
+				budget   = 30 * time.Millisecond
+			)
+			backend := suite.newBackend(t)
+			runs := newFakeLedger()
+			manager := NewManager(backend, Options{
+				OwnerID:                  "owner-durable-budget-" + phase,
+				StateTTL:                 time.Minute,
+				OwnerLeaseTTL:            leaseTTL,
+				durableFinishRetryBudget: budget,
+				Ledger:                   runs,
+				Fence:                    &fakeFence{},
+			})
+			if err := manager.Start(context.Background()); err != nil {
+				t.Fatalf("start manager: %v", err)
+			}
+			t.Cleanup(func() { _ = manager.Close() })
+
+			sessionID := "session-durable-budget-" + phase
+			admission, err := manager.Admit(context.Background(), AdmitInput{
+				BotID: testBotID, SessionID: sessionID,
+				InvocationID: "inv-durable-budget-" + phase,
+				Payload:      []byte(`{"text":"hi"}`),
+				Execution: Execution{
+					Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+						return RunAdmissionView{}, nil
+					},
+					AbortCh:  make(chan struct{}, 1),
+					Cancel:   func() {},
+					InjectCh: make(chan turn.InjectMessage, 1),
+				},
+			})
+			if err != nil {
+				t.Fatalf("admit run: %v", err)
+			}
+
+			transient := errors.New("database remains unavailable")
+			if phase == "prepare" {
+				runs.setPrepareErr(transient)
+			} else {
+				if _, err := manager.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{Type: native.EventAgentEnd}); err != nil {
+					t.Fatalf("prepare terminal event: %v", err)
+				}
+				runs.setFinalizeErr(transient)
+			}
+			if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+				t.Fatal("FinishRun() error = nil, want initial durable failure")
+			}
+
+			controlDeadline := time.Now().Add(time.Second)
+			for manager.localControlForHandle(admission.Handle) != nil && time.Now().Before(controlDeadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if manager.localControlForHandle(admission.Handle) != nil {
+				t.Fatal("durable retry budget expired without releasing local control")
+			}
+			runs.setPrepareErr(nil)
+			runs.setFinalizeErr(nil)
+
+			want := ledger.StateLost
+			if phase == "finalize" {
+				want = ledger.StateCompleted
+			}
+			reaperDeadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(reaperDeadline) {
+				if got := runs.state(admission.RunID); got == want {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			t.Fatalf("reaper state = %q, want %q after %s retry timeout", runs.state(admission.RunID), want, phase)
+		})
+	}
 }
 
 func runRuntimeManagerReconcilesResponseAfterOwnerControlLoss(t *testing.T, suite distributedRuntimeBackendContractSuite) {

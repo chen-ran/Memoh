@@ -302,6 +302,35 @@ func TestConsumeTriggeredStreamWithholdsTerminalWhenPersistenceFails(t *testing.
 	}
 }
 
+func TestConsumeTriggeredStreamPublishesEmptyCleanTerminalWithoutSnapshot(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	pub := &recordingTurnEventPublisher{}
+	svc := newTriggerStreamService(messages, pub)
+
+	events := make(chan native.StreamEvent, 1)
+	events <- native.StreamEvent{Type: native.EventAgentEnd}
+	close(events)
+
+	result, err := svc.consumeTriggeredStream(
+		context.Background(), events, triggerStreamRequest(), resolvedContext{},
+		sessionruntime.RunHandle{RunID: "run-empty", TurnID: "turn-empty"}, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("consumeTriggeredStream() error = %v, want clean completion", err)
+	}
+	if result.Status != "ok" || result.Text != "" {
+		t.Fatalf("result = %#v, want empty successful result", result)
+	}
+	if published := pub.published(); len(published) != 1 || published[0].Type != native.EventAgentEnd {
+		t.Fatalf("published events = %#v, want the empty terminal event", published)
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("persisted messages = %#v, want no synthetic output row", messages.persisted)
+	}
+}
+
 func TestConsumeTriggeredStreamStopsWhenProjectionRefused(t *testing.T) {
 	t.Parallel()
 

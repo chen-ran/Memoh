@@ -37,3 +37,16 @@ ALTER TABLE public.session_runs
         state <> 'finishing'
         OR (proposed_terminal_state IS NOT NULL AND finish_proposed_at IS NOT NULL)
     );
+
+-- Migrations run before the server starts, so replace both partial indexes in
+-- this schema transaction instead of spreading one logical change across
+-- concurrent build/swap versions.
+DROP INDEX IF EXISTS public.session_runs_single_active;
+CREATE UNIQUE INDEX IF NOT EXISTS session_runs_single_active
+    ON public.session_runs (team_id, session_id)
+    WHERE state IN ('accepted', 'running', 'waiting_decision', 'finishing');
+
+DROP INDEX IF EXISTS public.idx_session_runs_recovery;
+CREATE INDEX IF NOT EXISTS idx_session_runs_recovery
+    ON public.session_runs (team_id, live_generation, run_id)
+    WHERE state IN ('accepted', 'running', 'waiting_decision', 'finishing');

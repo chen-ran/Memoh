@@ -177,7 +177,7 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, "", runtimeOwnerShutdownError)
 		if terminal.RunID != "" {
 			requestRunControlStop(ctrl)
-			m.observeTerminalRun(ctx, terminal)
+			m.reconcileAndObserveTerminalRun(ctx, terminal)
 		}
 		return err
 	}

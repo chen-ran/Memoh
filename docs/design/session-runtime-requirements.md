@@ -163,6 +163,7 @@ run 进入终态时，终态、最终输出和 turn 投影必须形成一个一�
 - `finishing` 必须继续占用 session 的 active slot 并续租；
 - 新的输入、abort、steer 和 decision response 不能覆盖已接受的终态提案；
 - 第一次终态提案胜出，重试只能重放同一个结果；
+- owner 对持久化终态失败的本地重试必须有总预算；预算耗尽后，Redis/Valkey 部署停止续租并由 lease reaper 收敛，memory 部署把同一 fenced handle 交给本地 reaper 的共享重试队列，不能为每个 run 永久保留重试 goroutine；
 - owner 进程退出、租约到期、live backend 更换或优雅关机时，reaper/关闭流程必须把提案收敛为其原始 `completed`、`aborted` 或 `failed`，不能改写为 `lost`；
 - 只有从未跨过终态提案边界的 active run 才能因 owner 消失进入 `lost`。
 
