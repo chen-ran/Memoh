@@ -87,40 +87,41 @@ type localCommandResult struct {
 }
 
 type runControl struct {
-	botID             string
-	sessionID         string
-	runID             string
-	turnID            string
-	generation        string
-	fencingToken      int64
-	abortCh           chan<- struct{}
-	cancel            context.CancelFunc
-	admissionCancel   context.CancelFunc
-	lifecycleCtx      context.Context
-	lifecycleCancel   context.CancelFunc
-	injectCh          chan<- turn.InjectMessage
-	injectMu          sync.Mutex
-	injectStopped     bool
-	converter         *chatview.UIMessageStreamConverter
-	leaseStop         func()
-	leaseDone         chan struct{}
-	leaseLifecycleMu  sync.Mutex
-	leaseMu           sync.RWMutex
-	leaseValidUntil   time.Time
-	leaseChanged      chan struct{}
-	ready             chan struct{}
-	readyOnce         sync.Once
-	decisionMu        sync.Mutex
-	decisionReady     chan struct{}
-	decisionReadyOnce sync.Once
-	abortStateMu      sync.Mutex
-	claimEstablished  bool
-	admissionComplete bool
-	abortRequested    bool
-	abortFinalizing   bool
-	finishRetryOnce   sync.Once
-	ownershipCancel   context.CancelCauseFunc
-	ownershipOnce     sync.Once
+	botID                  string
+	sessionID              string
+	runID                  string
+	turnID                 string
+	generation             string
+	fencingToken           int64
+	abortCh                chan<- struct{}
+	cancel                 context.CancelFunc
+	admissionCancel        context.CancelFunc
+	lifecycleCtx           context.Context
+	lifecycleCancel        context.CancelFunc
+	injectCh               chan<- turn.InjectMessage
+	injectMu               sync.Mutex
+	injectStopped          bool
+	converter              *chatview.UIMessageStreamConverter
+	leaseStop              func()
+	leaseDone              chan struct{}
+	leaseLifecycleMu       sync.Mutex
+	leaseMu                sync.RWMutex
+	leaseValidUntil        time.Time
+	leaseChanged           chan struct{}
+	ready                  chan struct{}
+	readyOnce              sync.Once
+	decisionMu             sync.Mutex
+	decisionReady          chan struct{}
+	decisionReadyOnce      sync.Once
+	abortStateMu           sync.Mutex
+	claimEstablished       bool
+	admissionComplete      bool
+	abortRequested         bool
+	abortFinalizing        bool
+	durableFinishRetryOnce sync.Once
+	finishRetryOnce        sync.Once
+	ownershipCancel        context.CancelCauseFunc
+	ownershipOnce          sync.Once
 	// ownershipLost records that ownership was revoked *with cause*, as opposed
 	// to the ordinary teardown that also revokes. Only the former means this
 	// process may no longer speak for the run, and the runner cannot tell the two
@@ -361,12 +362,71 @@ func (m *Manager) observeTerminalRun(ctx context.Context, run TerminalRun) {
 	if m == nil || run.RunID == "" {
 		return
 	}
+	m.reconcileTerminalLive(context.WithoutCancel(ctx), run)
 	m.mu.Lock()
 	observer := m.terminalObserver
 	m.mu.Unlock()
 	if observer != nil {
 		observer(context.WithoutCancel(ctx), run)
 	}
+}
+
+// reconcileTerminalLive repairs the Redis side of a terminal commit that
+// outlived its owner. Unlike ordinary owner release, this path is allowed after
+// lease expiry, but only while the stored run ref still carries the exact
+// durable fencing token observed by the reaper.
+func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRun) {
+	if m == nil || m.distributed == nil || terminal.FencingToken <= 0 {
+		return
+	}
+	key := Key{BotID: terminal.BotID, SessionID: terminal.SessionID}
+	ref, ok, err := m.distributed.LoadRunRef(ctx, key, terminal.RunID)
+	if err != nil {
+		m.logger.Warn("load runtime ref for terminal reconciliation failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+		return
+	}
+	if !ok || ref.FencingToken != terminal.FencingToken {
+		return
+	}
+	status := liveRunStatus(ledger.State(terminal.State))
+	snapshot, changed, err := m.distributed.ReconcileTerminalRun(ctx, key, ref, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+		run := snapshot.CurrentRunView
+		if run == nil || run.RunID != ref.RunID || run.Generation != ref.Generation || run.OwnerID != ref.OwnerID {
+			return snapshot, false, ErrRunOwnershipLost
+		}
+		snapshot.Seq++
+		snapshot.UpdatedAt = now
+		run.Status = status
+		run.UpdatedAt = now
+		run.OwnerLeaseExpiresAt = nil
+		run.ProposedTerminalStatus = ""
+		run.FinishProposedAt = nil
+		run.ErrorCode = strings.TrimSpace(terminal.ErrorCode)
+		run.Error = strings.TrimSpace(terminal.ErrorMessage)
+		if status == RunStatusCompleted || status == RunStatusAborted {
+			run.ErrorCode = ""
+			run.Error = ""
+		}
+		rejectPendingSteerOnRunFinish(run, now)
+		return snapshot, true, nil
+	})
+	if err != nil {
+		if !errors.Is(err, ErrRunOwnershipLost) {
+			m.logger.Warn("reconcile durable runtime terminal to live state failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+		}
+		return
+	}
+	if !changed {
+		return
+	}
+	delta := runtimeRunPatch(snapshot, true, true, true, true)
+	if err := m.publishRuntimeDelta(ctx, snapshot, terminal.RunID, delta); err != nil {
+		m.logger.Warn("publish reconciled runtime terminal failed; subscribers will reload snapshot", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+	}
+	m.forgetLocalControlForHandle(ctx, RunHandle{
+		BotID: terminal.BotID, SessionID: terminal.SessionID, RunID: terminal.RunID,
+		Generation: ref.Generation, FencingToken: terminal.FencingToken,
+	})
 }
 
 func (m *Manager) reconcileTerminalRuns(ctx context.Context) error {
@@ -1040,6 +1100,41 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		if snapshot, ok, loadErr := m.backend.Load(ctx, handle.key()); loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) {
 			errorCode = strings.TrimSpace(snapshot.CurrentRunView.ErrorCode)
 		}
+		if errorCode == "" {
+			errorCode = "runtime_run_failed"
+		}
+	}
+	prepared, err := m.prepareLedgerFinish(
+		ctx,
+		handle,
+		status,
+		errorCode,
+		finishMessage,
+		strings.TrimSpace(status) != "" || errorCode != "" || finishMessage != "",
+	)
+	if err != nil {
+		if errors.Is(err, ErrRunOwnershipLost) && prepared.State.Terminal() {
+			m.observeTerminalRun(ctx, terminalRunFromLedger(prepared))
+			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
+		} else if !errors.Is(err, ErrRunOwnershipLost) {
+			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
+		}
+		return err
+	}
+	if prepared.State == ledger.StateWaitingDecision {
+		if ctrl != nil {
+			ctrl.markDecisionReady()
+		}
+		return nil
+	}
+	if prepared.State == ledger.StateFinishing {
+		status = liveRunStatus(prepared.ProposedState)
+		errorCode = strings.TrimSpace(prepared.ProposedErrorCode)
+		finishMessage = strings.TrimSpace(prepared.ProposedErrorMessage)
+	} else if prepared.State.Terminal() {
+		status = liveRunStatus(prepared.State)
+		errorCode = strings.TrimSpace(prepared.ErrorCode)
+		finishMessage = strings.TrimSpace(prepared.ErrorMessage)
 	}
 	terminal, err := m.finalizeLedgerRun(ctx, handle, status, errorCode, finishMessage)
 	if terminal.RunID != "" {
@@ -1051,11 +1146,14 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			// release shared state, but it must stop its stale local control and
 			// lease renewal before the authoritative outcome is observed.
 			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
+		} else if !errors.Is(err, ErrRunOwnershipLost) {
+			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
 		}
 		// The lease is deliberately left alone: it is the only pointer the
-		// reaper has to this run, and the durable row still says the run is
-		// active. Renewal has already stopped, so expiry brings the reaper. The
-		// terminal newer-fence case above is the exception: no reaping remains.
+		// reaper has to this run. Renewal continues while this owner retries the
+		// durable transition; if ownership is lost, expiry hands the prepared
+		// proposal to the reaper. The terminal newer-fence case above is the
+		// exception: no reaping remains.
 		return err
 	}
 	changed, err := m.finishRunState(ctx, handle, status, errorCode, finishMessage)
@@ -1079,6 +1177,52 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		})
 	}
 	return err
+}
+
+func (m *Manager) scheduleDurableFinishRetry(
+	ctx context.Context,
+	ctrl *runControl,
+	status, errorCode, message string,
+) {
+	if m == nil || ctrl == nil || m.localControlForHandle(ctrl.handle()) != ctrl {
+		return
+	}
+	ctrl.durableFinishRetryOnce.Do(func() {
+		go m.retryDurableFinish(ctx, ctrl, status, errorCode, message)
+	})
+}
+
+func (m *Manager) retryDurableFinish(
+	ctx context.Context,
+	ctrl *runControl,
+	status, errorCode, message string,
+) {
+	delay := 100 * time.Millisecond
+	for {
+		select {
+		case <-m.closeCh:
+			return
+		case <-time.After(delay):
+		}
+		if m.localControlForHandle(ctrl.handle()) != ctrl {
+			return
+		}
+		err := m.finishRun(ctx, ctrl.handle(), status, errorCode, message)
+		if err == nil {
+			return
+		}
+		if errors.Is(err, ErrRunOwnershipLost) || errors.Is(err, ErrManagerClosed) {
+			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), ctrl.handle())
+			return
+		}
+		m.logger.Warn("retry durable runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
+		if delay < time.Second {
+			delay *= 2
+			if delay > time.Second {
+				delay = time.Second
+			}
+		}
+	}
 }
 
 // resolveTerminalStatus decides once, for both terminal writes, how a run ended.
@@ -1109,6 +1253,8 @@ func (m *Manager) resolveTerminalStatus(ctx context.Context, handle RunHandle, s
 	}
 	run := snapshot.CurrentRunView
 	switch {
+	case strings.TrimSpace(run.ProposedTerminalStatus) != "":
+		return strings.TrimSpace(run.ProposedTerminalStatus)
 	case strings.EqualFold(run.Status, RunStatusAborting), strings.EqualFold(run.Status, RunStatusAborted):
 		return RunStatusAborted
 	case strings.TrimSpace(run.ErrorCode) != "", strings.TrimSpace(run.Error) != "", strings.TrimSpace(errorCode) != "", strings.TrimSpace(message) != "":
@@ -1164,6 +1310,8 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 			snapshot.CurrentRunView.Error = ""
 		}
 		snapshot.CurrentRunView.OwnerLeaseExpiresAt = nil
+		snapshot.CurrentRunView.ProposedTerminalStatus = ""
+		snapshot.CurrentRunView.FinishProposedAt = nil
 		rejectPendingSteerOnRunFinish(snapshot.CurrentRunView, now)
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
@@ -1225,6 +1373,77 @@ func (m *Manager) cleanupFinishedRun(ctx context.Context, handle RunHandle) {
 	if _, err := m.distributed.DeleteRunRef(context.WithoutCancel(ctx), ref); err != nil {
 		m.logger.Warn("delete finished runtime stream reference failed", slog.Any("error", err), slog.String("run_id", handle.RunID))
 	}
+}
+
+type agentTerminalProposal struct {
+	prepared  bool
+	status    string
+	errorCode string
+	error     string
+	at        time.Time
+}
+
+// prepareAgentTerminalEvent persists the recoverable outcome before the live
+// projection enters finishing. A waiting decision is deliberately excluded:
+// Native closes that stream too, but the same run must resume after the answer.
+func (m *Manager) prepareAgentTerminalEvent(
+	ctx context.Context,
+	handle RunHandle,
+	event native.StreamEvent,
+) (agentTerminalProposal, error) {
+	if event.Type != native.EventAgentEnd && event.Type != native.EventAgentAbort {
+		return agentTerminalProposal{}, nil
+	}
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil {
+		return agentTerminalProposal{}, err
+	}
+	if !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) || !m.runOwnerMatches(snapshot.CurrentRunView) {
+		return agentTerminalProposal{}, ErrRunOwnershipLost
+	}
+	run := snapshot.CurrentRunView
+	if strings.EqualFold(run.Status, RunStatusWaitingDecision) {
+		return agentTerminalProposal{}, nil
+	}
+	status := RunStatusCompleted
+	switch {
+	case strings.TrimSpace(run.ErrorCode) != "", strings.TrimSpace(run.Error) != "":
+		status = RunStatusErrored
+	case strings.EqualFold(run.Status, RunStatusAborting), event.Type == native.EventAgentAbort:
+		status = RunStatusAborted
+	}
+	errorCode := strings.TrimSpace(run.ErrorCode)
+	if status == RunStatusErrored && errorCode == "" {
+		errorCode = "runtime_run_failed"
+	}
+	prepared, err := m.prepareLedgerFinish(
+		ctx,
+		handle,
+		status,
+		errorCode,
+		"",
+		false,
+	)
+	if err != nil {
+		return agentTerminalProposal{}, err
+	}
+	if prepared.State == ledger.StateWaitingDecision {
+		return agentTerminalProposal{}, nil
+	}
+	if prepared.State.Terminal() {
+		return agentTerminalProposal{}, ErrRunOwnershipLost
+	}
+	if prepared.State == ledger.StateFinishing {
+		status = liveRunStatus(prepared.ProposedState)
+		return agentTerminalProposal{
+			prepared:  true,
+			status:    status,
+			errorCode: strings.TrimSpace(prepared.ProposedErrorCode),
+			error:     strings.TrimSpace(prepared.ProposedErrorMessage),
+			at:        prepared.FinishProposedAt,
+		}, nil
+	}
+	return agentTerminalProposal{}, ErrRunOwnershipLost
 }
 
 func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event native.StreamEvent) ([]chatview.UIMessage, error) {
@@ -1289,6 +1508,10 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	if !visibleChange {
 		return messages, nil
 	}
+	terminalProposal, err := m.prepareAgentTerminalEvent(ctx, handle, event)
+	if err != nil {
+		return messages, err
+	}
 
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
@@ -1322,26 +1545,28 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 				run.Status = RunStatusRunning
 			}
 		case native.EventAgentEnd:
-			if strings.EqualFold(run.Status, RunStatusWaitingDecision) {
+			if !terminalProposal.prepared {
 				return snapshot, true, nil
 			}
-			switch {
-			case strings.TrimSpace(run.ErrorCode) != "", strings.TrimSpace(run.Error) != "":
-				run.Status = RunStatusErrored
-			case strings.EqualFold(run.Status, RunStatusAborting):
-				run.Status = RunStatusAborted
-			default:
-				run.Status = RunStatusCompleted
+			run.Status = RunStatusFinishing
+			run.ProposedTerminalStatus = terminalProposal.status
+			proposedAt := terminalProposal.at
+			if proposedAt.IsZero() {
+				proposedAt = now
 			}
-			run.OwnerLeaseExpiresAt = nil
+			run.FinishProposedAt = &proposedAt
 			rejectPendingSteerOnRunFinish(run, now)
 		case native.EventAgentAbort:
-			if strings.TrimSpace(run.ErrorCode) != "" || strings.TrimSpace(run.Error) != "" {
-				run.Status = RunStatusErrored
-			} else {
-				run.Status = RunStatusAborted
+			if !terminalProposal.prepared {
+				return snapshot, true, nil
 			}
-			run.OwnerLeaseExpiresAt = nil
+			run.Status = RunStatusFinishing
+			run.ProposedTerminalStatus = terminalProposal.status
+			proposedAt := terminalProposal.at
+			if proposedAt.IsZero() {
+				proposedAt = now
+			}
+			run.FinishProposedAt = &proposedAt
 			rejectPendingSteerOnRunFinish(run, now)
 		case native.EventError:
 			run.ErrorCode = strings.TrimSpace(event.Code)
@@ -1354,9 +1579,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}, func(snapshot Snapshot) RuntimeDelta {
 		switch event.Type {
 		case native.EventAgentEnd, native.EventAgentAbort:
-			waiting := snapshot.CurrentRunView != nil &&
-				strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision)
-			delta.Run = runtimeRunPatch(snapshot, true, !waiting, !waiting, m.distributed != nil).Run
+			delta.Run = runtimeRunPatch(snapshot, true, terminalProposal.prepared, terminalProposal.prepared, false).Run
 		case native.EventAgentStart, native.EventToolApprovalRequest, native.EventUserInputRequest:
 			delta.Run = runtimeRunPatch(snapshot, true, false, false, false).Run
 		case native.EventError, native.EventRetry:
@@ -1374,7 +1597,11 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		return nil, nil
 	}
 	if committedStatus != nil && snapshot.CurrentRunView != nil && snapshot.CurrentRunView.RunID == handle.RunID {
-		*committedStatus = snapshot.CurrentRunView.Status
+		if terminalProposal.prepared {
+			*committedStatus = terminalProposal.status
+		} else {
+			*committedStatus = snapshot.CurrentRunView.Status
+		}
 	}
 	return messages, nil
 }
@@ -1536,6 +1763,13 @@ func (m *Manager) hydrateSnapshotFromLedger(ctx context.Context, snapshot Snapsh
 		Error:        strings.TrimSpace(run.ErrorMessage),
 		ErrorCode:    strings.TrimSpace(run.ErrorCode),
 	}
+	if run.State == ledger.StateFinishing {
+		snapshot.CurrentRunView.ProposedTerminalStatus = liveRunStatus(run.ProposedState)
+		if !run.FinishProposedAt.IsZero() {
+			proposedAt := run.FinishProposedAt
+			snapshot.CurrentRunView.FinishProposedAt = &proposedAt
+		}
+	}
 	return snapshot
 }
 
@@ -1551,6 +1785,8 @@ func liveRunStatus(state ledger.State) string {
 		return RunStatusRunning
 	case ledger.StateWaitingDecision:
 		return RunStatusWaitingDecision
+	case ledger.StateFinishing:
+		return RunStatusFinishing
 	case ledger.StateAborted:
 		return RunStatusAborted
 	case ledger.StateFailed:

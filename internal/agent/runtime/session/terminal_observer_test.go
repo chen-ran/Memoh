@@ -3,7 +3,9 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
@@ -35,7 +37,7 @@ func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {
 	want := TerminalRun{
 		RunID: admission.RunID, BotID: testBotID, SessionID: testSessionID,
 		FencingToken: admission.Handle.FencingToken, State: string(ledger.StateFailed),
-		ErrorCode: "runtime_run_failed",
+		ErrorCode: "runtime_run_failed", ErrorMessage: "provider.unavailable",
 	}
 	if observed[0] != want {
 		t.Fatalf("terminal observation = %+v, want %+v", observed[0], want)
@@ -62,6 +64,55 @@ func TestFinishRunWithErrorCodePersistsStableCodeWithoutDiagnostic(t *testing.T)
 	}
 	if writes[0].ErrorCode != "agent.response_timeout" || writes[0].ErrorMessage != "" {
 		t.Fatalf("terminal error = code:%q message:%q", writes[0].ErrorCode, writes[0].ErrorMessage)
+	}
+}
+
+func TestFinishRunRetriesTransientDurableFailuresWhileRetainingOwnership(t *testing.T) {
+	for _, phase := range []string{"prepare", "finalize"} {
+		t.Run(phase, func(t *testing.T) {
+			fixture := newAdmitFixture(t)
+			admission, err := fixture.manager.Admit(context.Background(), fixture.input("inv-retry-"+phase, `{"text":"hi"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			transient := errors.New("database temporarily unavailable")
+			if phase == "prepare" {
+				fixture.runs.setPrepareErr(transient)
+			} else {
+				if _, err := fixture.manager.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{Type: native.EventAgentEnd}); err != nil {
+					t.Fatalf("prepare terminal event: %v", err)
+				}
+				fixture.runs.setFinalizeErr(transient)
+			}
+
+			err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
+			if err == nil || !strings.Contains(err.Error(), transient.Error()) {
+				t.Fatalf("first finish error = %v, want transient durable failure", err)
+			}
+			if fixture.manager.localControlForHandle(admission.Handle) == nil {
+				t.Fatal("owner control was dropped before durable retry could converge")
+			}
+			fixture.runs.setPrepareErr(nil)
+			fixture.runs.setFinalizeErr(nil)
+
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				run, getErr := fixture.runs.Get(context.Background(), admission.RunID)
+				if getErr == nil && run.State == ledger.StateCompleted {
+					snapshot, snapshotErr := fixture.manager.Snapshot(context.Background(), testBotID, testSessionID)
+					if snapshotErr == nil && snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == RunStatusCompleted {
+						if fixture.manager.localControlForHandle(admission.Handle) != nil {
+							t.Fatal("owner control remains after durable retry completed")
+						}
+						return
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			run, _ := fixture.runs.Get(context.Background(), admission.RunID)
+			snapshot, _ := fixture.manager.Snapshot(context.Background(), testBotID, testSessionID)
+			t.Fatalf("durable retry did not converge: ledger=%#v live=%#v", run, snapshot.CurrentRunView)
+		})
 	}
 }
 
