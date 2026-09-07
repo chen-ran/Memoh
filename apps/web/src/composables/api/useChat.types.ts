@@ -21,6 +21,11 @@ export interface SessionSummary {
   updated_at?: string
   route_metadata?: Record<string, unknown>
   route_conversation_type?: string
+  /** Session's persisted (model, effort) pair (issue #879); empty = no memory. */
+  preferred_external_model_id?: string
+  model_preference_revision?: string
+  preferred_chat_model_id?: string
+  preferred_reasoning_effort?: string
 }
 
 // Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier
@@ -520,7 +525,15 @@ export type UIRuntimeEvent =
   | UIRuntimeDeltaEvent
   | UIRuntimeDroppedEvent
 
+export interface UIStreamModelPreferenceSettledEvent {
+  type: 'model_preference_settled'
+  invocation_id: string
+  run_id: string
+  session_id: string
+}
+
 export type UIStreamEvent =
+  | UIStreamModelPreferenceSettledEvent
   | UIStreamRunAcceptedEvent
   | UIStreamRunRejectedEvent
   | UIStreamErrorEvent

@@ -483,6 +483,10 @@ func (*fakeCommandQueries) GetTokenUsageByModel(_ context.Context, _ dbsqlc.GetT
 	return nil, nil
 }
 
+func (*fakeCommandQueries) UpdateSessionModelPreference(_ context.Context, _ dbsqlc.UpdateSessionModelPreferenceParams) error {
+	return nil
+}
+
 func (f *fakeChatACL) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool, error) {
 	f.calls++
 	f.lastReq = req
