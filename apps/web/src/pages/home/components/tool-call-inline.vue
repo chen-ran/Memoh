@@ -7,7 +7,6 @@
       v-if="expandable"
       :open="open"
       nested
-      :tone="display.isError ? 'error' : 'cop'"
       @toggle="toggleOpen"
     >
       <ConnectorLogo
@@ -47,10 +46,6 @@
         v-if="display.diffRemove"
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
-      <span
-        v-if="exitLabel"
-        class="font-mono shrink-0"
-      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -108,10 +103,6 @@
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
-        v-if="exitLabel"
-        class="font-mono shrink-0"
-      >{{ exitLabel }}</span>
-      <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ approvalLabel }}</span>
@@ -134,8 +125,8 @@
         class="mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]"
       >
         <component
-          :is="display.detail"
-          v-if="display.detail"
+          :is="detailComponent"
+          v-if="detailComponent"
           :block="block"
         />
         <ToolCallDetailGeneric
@@ -149,8 +140,8 @@
         class="mt-1.5 font-[400]"
       >
         <component
-          :is="display.detail"
-          v-if="display.detail"
+          :is="detailComponent"
+          v-if="detailComponent"
           :block="block"
         />
         <ToolCallDetailGeneric
@@ -175,6 +166,7 @@ import {
 } from './tool-call-registry'
 import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import { hasToolResultError } from './tool-result-error'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
@@ -189,6 +181,10 @@ const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const title = computed(() => getToolTitle(props.block, t))
 const display = computed(() => title.value.display)
+// Specialized panels describe successful results or attempted inputs. Failed
+// results use the shared diagnostic detail, without changing the neutral title.
+const resultFailed = computed(() => hasToolResultError(props.block))
+const detailComponent = computed(() => resultFailed.value ? ToolCallDetailGeneric : display.value.detail)
 
 // A Connect-It tool carries its binding's alias in the tool name; when that
 // alias resolves to one of the bot's connectors the row leads with its logo.
@@ -211,6 +207,7 @@ watch(collapseKey, (key) => {
 
 const expandable = computed(() => {
   if (isPending.value) return false
+  if (resultFailed.value) return true
   if (display.value.detail === ToolCallDetailWrite) {
     const input = props.block.input as Record<string, unknown> | undefined
     return (typeof input?.content === 'string' && input.content.length > 0)
@@ -219,25 +216,16 @@ const expandable = computed(() => {
   return Boolean(display.value.detail) || display.value.expandable === true
 })
 
-// A failed command carries its exit status on the collapsed row; every other
-// failure detail stays in the expanded output.
-const exitLabel = computed(() => (
-  display.value.exitCode ? t('chat.tools.exitCode', { code: display.value.exitCode }) : ''
-))
-
 const isPending = computed(() => title.value.pending)
 const showPendingLabel = computed(() => title.value.pending)
 const showActionLabel = computed(() => title.value.showAction)
 const renderedActionLabel = computed(() => title.value.action)
 
-// Every row is gray at rest and animates to near-black (foreground) on hover:
-// one neutral material, with color expressing interaction. Rest ink matches the
-// process/thinking headers (--cop-title) so a lone tool row and a collapsed
-// group read at the same weight.
-const rowClass = computed(() => {
-  if (display.value.isError) return 'text-destructive transition-colors duration-75'
-  return 'text-cop-title hover:text-foreground transition-colors duration-75'
-})
+// 工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
+// 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
+// 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的
+// 任务失败由回合级错误反馈表达，不能从某一次工具调用推导。
+const rowClass = 'text-cop-title hover:text-foreground transition-colors duration-75'
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
 // shimmer for them flickers, so we only display it after a short delay.
@@ -272,7 +260,6 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
-  if (display.value.isError) return 'text-destructive'
   return '' // inherit the row's gray→black hover color
 })
 
