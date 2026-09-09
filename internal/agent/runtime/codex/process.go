@@ -2,8 +2,8 @@ package codex
 
 import (
 	"context"
-	"fmt"
 	"strings"
+	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -18,13 +18,12 @@ func startAppServer(ctx context.Context, client *bridge.Client, workDir, home st
 	if workDir == "" {
 		workDir = defaultProjectPath
 	}
-	if err := client.Mkdir(ctx, home); err != nil {
-		return nil, fmt.Errorf("create codex home %s: %w", home, err)
-	}
-	if err := prepareRuntimeTmp(ctx, client, home); err != nil {
+	if err := prepareRuntimeStorage(ctx, client, home); err != nil {
 		return nil, err
 	}
-	if err := materializeCodexConfig(ctx, client, home, cfg); err != nil {
+	configCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := materializeCodexConfig(configCtx, client, home, cfg); err != nil {
 		return nil, err
 	}
 	return agentprocess.Start(ctx, client, launcherPath+" app-server", workDir, codexAppServerEnv(home))

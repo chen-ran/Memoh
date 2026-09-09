@@ -1,173 +1,231 @@
-# Codex runtime storage isolation (draft v0.1)
+# Codex native storage isolation
 
-Status: first implementation for review, **not a complete NFS compatibility fix**.
-No production migration is performed by this change.
+Status: revised after real NFSv3 fault injection. The implementation requires a
+provider-managed persistent local volume for network-backed workspaces. It does
+not claim that an ephemeral local directory makes native state recoverable.
 
-## Problem and upstream audit
+## Problem and verified startup path
 
-The direct Codex driver places `CODEX_HOME` at
-`/data/.codex/agents/<agent-id>`. That preserves native thread data, but also
-puts Codex's bootstrap locks on whatever filesystem backs `/data`.
+Memoh addresses each Codex home as `/data/.codex/agents/<agent-id>`. If `/data`
+is NFS, native bootstrap locks and SQLite locks depend on network lock RPCs.
+A nonblocking `flock` can still wait inside an NFS RPC before returning to the
+application. A healthy bridge stream then sees an initialize timeout.
 
-With a network-backed home, `flock(LOCK_EX | LOCK_NB)` on an arg0 lock can wait
-in the kernel's network-filesystem RPC path. The app-server has not reached
-`initialize` yet, so a healthy stdio transport still produces a handshake
-timeout. This failure class is not specific to a hosted provider.
+The first implementation moved only `CODEX_HOME/tmp` to `/tmp`. Real Docker
+NFSv3 testing with the pinned **Codex 0.151.0**, a kernel NFS mount with
+`local_lock=none`, and NFS-Ganesha 4.3 disproved that as a sufficient fix:
 
-Audited source: [Codex rust-v0.151.0 arg0](https://github.com/openai/codex/blob/rust-v0.151.0/codex-rs/arg0/src/lib.rs).
-It creates helper aliases in `CODEX_HOME/tmp/arg0/codex-arg0*`, holds `.lock`
-for the process lifetime, and tries to lock old directories before deleting
-them. The path is not redirected by `TMPDIR`. Release builds also reject an
-entire `CODEX_HOME` under the system temporary directory: initialization may
-continue with a warning and missing aliases. Therefore an initialize-only
-test with a fresh `/tmp` home does not prove tool compatibility.
+| NLM unavailable, ordinary NFS I/O still available | Observed result |
+| --- | --- |
+| Original home | `tmp/arg0/.../.lock` blocks in `flock(LOCK_EX\|LOCK_NB)` for over 60 seconds. |
+| Only tmp local | arg0 lock succeeds in about 28 microseconds; `state_5.sqlite` blocks in `fcntl(F_SETLK)`, then app-server exits after about 30 seconds with SQLite initialization failure. |
+| tmp and SQLite local (diagnostic) | Initialization still waits on `CODEX_HOME/installation_id` via `flock(LOCK_EX)`. |
+| tmp, SQLite and installation_id local (diagnostic) | Initialization completes in 0.789 seconds and native `apply_patch` works. |
 
-## Scope of this iteration
+The diagnostic cases were disposable experiments, not migration recipes.
+Timings document one observation, not performance guarantees.
 
-Keep the durable home, configuration, encrypted credential store, native
-thread identifiers, sessions, and SQLite placement unchanged. Prepare only
-the bootstrap temporary directory before starting Codex:
+Pinned upstream evidence:
+
+- [arg0 aliases and lifetime locks](https://github.com/openai/codex/blob/rust-v0.151.0/codex-rs/arg0/src/lib.rs): helpers live below home/tmp/arg0; TMPDIR does not redirect them. Release builds reject a home under the system temporary directory.
+- [SQLite configuration](https://github.com/openai/codex/blob/rust-v0.151.0/codex-rs/state/src/sqlite.rs): state, logs, goals, memories and queue databases use SQLite WAL. They cannot all be assumed rebuildable indexes.
+- [installation identity](https://github.com/openai/codex/blob/rust-v0.151.0/codex-rs/core/src/installation_id.rs): `resolve_installation_id` locks the file before reading even an existing UUID; prepopulating it does not remove this lock.
+- [SQLite WAL restrictions](https://sqlite.org/wal.html): moving only the bootstrap lock does not make an NFS database safe.
+
+## Storage decision
+
+Keep workspace files on their existing `/data` mount, but place the **entire
+native Codex home on a persistent local filesystem** when that mount is not
+known local. Keeping all native files together preserves credentials, SQLite
+DB/WAL relationships, installation identity, sessions, and future native lock
+files. There is no whole-home live copier or per-turn backup protocol.
+
+The externally addressed home stays stable:
 
 ```text
-/data/.codex/agents/<agent-id>/
-  config.toml                    unchanged
-  auth.json                      unchanged
-  sessions/ and native state     unchanged
-  tmp -> /tmp/memoh-codex-runtime-<uid>/<sha256-of-home>/
-           arg0/codex-arg0*/      created and locked by Codex, not Memoh
+/data/                                      existing workspace files (may be NFS)
+  .codex/agents/<agent-id> -> /var/lib/memoh/codex-state/<volume-id>/<home-hash>
+
+/var/lib/memoh/codex-state/                   dedicated persistent local mount
+  .memoh-volume.json                        immutable volume identity
+  .memoh-prepare.lock                       local preparation lock
+  <volume-id>/<sha256-of-addressed-home>/    private native home, mode 0700
+    .memoh-native-home.json                 addressed home + volume identity
+    config.toml, auth.json                  same credential/configuration paths
+    installation_id                        ordinary durable local file
+    state_*.sqlite, *-wal, *-shm             ordinary local SQLite files
+    goals_*.sqlite, memories_*.sqlite, ...   same native state boundary
+    sessions/, archived_sessions/, ...     durable native transcripts
+    tmp/arg0/codex-arg0*/                   Codex-owned helper directories
 ```
 
-This is a narrow mapping **from a durable tmp entry to local transient
-storage**, not a link from an entire runtime home back to a persistent volume.
-The location is inside the workspace, never the Memoh server's local /tmp.
+For an existing real home on a known local filesystem, keep the existing layout.
+The v0.1 managed tmp link remains supported on such local homes, including
+recreation of its transient target. New local homes let Codex create tmp itself.
 
-### Preparation contract
+The image/adapter must mount the persistent volume **inside each bot workspace**
+at `/var/lib/memoh/codex-state`; mounting it on the Memoh server does not help.
+A separate local block-backed filesystem/volume is required. The helper accepts
+ext2/3/4, xfs, btrfs, zfs or f2fs and verifies a distinct mount ID. It rejects
+NFS, unknown/FUSE filesystems, container overlay and tmpfs for this volume.
+A Docker named volume backed by the VM's ext4 filesystem qualifies. A Docker
+volume backed by NFS does not. A bind mount of a disposable local directory
+could pass the filesystem test: retention is an explicit deployment contract,
+not something filesystem detection can prove.
 
-- A missing `tmp` gets the managed link. Concurrent prepares accept only the
-  same mapping. No existing entry is replaced or deleted.
-- Existing real `tmp` directories on known local filesystems remain unchanged.
-- Existing real `tmp` on an unsupported/network filesystem fails with
-  `legacy_tmp_requires_drain`. Even an apparently empty directory may be in use;
-  startup must not rename it, unlink locks, or probe them with another flock.
-- Unknown links, symlinked parents, non-directory entries, and unsafe local
-  ownership/permissions fail closed. A missing target of the exact managed
-  link can be recreated after workspace replacement.
-- Directory walks use `O_NOFOLLOW` and descriptor-relative operations. The
-  private local root and agent directory are owned by the effective UID with
-  mode 0700. Filesystem checks resolve `/proc/self/fdinfo` mount IDs rather than
-  guessing by pathname; unknown filesystems are not assumed safe.
-- The local-filesystem allowlist is conservative, not proof of every backing
-  storage topology. In particular a custom overlay can hide a remote upperdir;
-  supported workspace images must ensure the transient root is really local.
-- The helper is embedded in the server and passed through bridge stdin to
-  the toolkit's pinned Python, in isolated mode with a clean environment.
-  This avoids an extra image helper file or a new privileged mount capability.
-  Both RPC and process preparation have a ten-second deadline. A broken NFS
-  metadata operation can still stall in the kernel: backend process cleanup
-  remains a separate requirement.
+The adapter owns volume identity, single attachment, retention across workspace
+replacement, backup, and restore. The same persistent native volume must be
+reattached before restoring/replacing a workspace. This PR does not add an
+automatic volume provisioner or implement provider-specific storage APIs.
+Deployments offering only NFS and an ephemeral root must provide this storage
+capability before enabling the direct Codex runtime; silently losing native
+state is not an acceptable fallback.
 
-The managed link target is stable per home/UID in a workspace. A per-process
-UUID **in the durable symlink target** would allow a second process to repoint
-the first process's helper path. Instead Codex already allocates and locks
-its own unique subdirectories below the stable target. Identical link text
-across workspace generations resolves to separate local filesystems. This
-requires the managed workspace UID to stay stable; changing UID needs a
-reviewed, drained layout migration.
+## Preparation and identity contract
 
-Memoh does not delete this shared tmp parent on app-server Close. Codex owns
-the lifetime and janitor cleanup of each arg0 child. Deleting the parent could
-break another live/draining process. A few empty parent directories can remain
-until workspace disposal. This is not a distributed ownership mechanism:
-cross-server startup coordination and fencing must not rely on local flock.
+- Preparation runs through the existing bridge and embedded pinned-toolkit
+  Python, with isolated Python mode, clean environment and a ten-second RPC
+  and process deadline. It uses descriptor-relative, no-follow traversal.
+- Preparation happens **before credential materialization**. It creates parent
+  directories, then chooses a local home or publishes a new managed home link.
+  Credential and configuration writes retain their addressed paths and resolve
+  into the same home as Codex. Login, refresh, logout and encrypted credential
+  CAS therefore keep their existing ownership boundary.
+- Existing network home directories are never migrated by startup, even if
+  empty. They return `native_home_requires_drain` before launching Codex.
+- The persistent volume has an atomically created immutable UUID. Managed link
+  text includes that UUID; a replacement empty/wrong volume is rejected rather
+  than regenerating installation identity or creating a fresh SQLite database.
+- A managed link whose native home or home marker is missing is rejected.
+  Only the legacy **temporary** target is recreatable; durable native state is
+  not. Orphaned nonempty native homes are not silently reattached to a missing
+  anchor.
+- A local preparation lock serializes publication/migration on the native
+  volume. No lock is acquired on NFS. It is not distributed fencing: the
+  provider must enforce single attachment of the native volume.
+- The native home is not deleted at app-server Close. Codex owns its arg0
+  children and janitor; concurrent/recycled app-servers retain distinct helper
+  directories on the same local home.
 
-## What is deliberately not solved yet
+Config/credential materialization also has bounded I/O deadlines. Those bounds
+are separate from initialize, and a cancelled RPC is not itself evidence of
+remote process exit. Generic provider process termination remains its own
+contract; the storage helper does not change detached/background exec behavior.
 
-1. **SQLite/WAL and complete native recovery.** Moving arg0 does not make an
-   SQLite database on NFS safe. Audit the pinned CLI's complete state graph
-   before enabling this as a full NFS support claim. Distinguish rebuildable
-   indexes from irrecoverable state. Prefer supported path configuration and
-   explicit native-state persistence; evaluate the existing agentstate port
-   rather than inventing a whole-home bidirectional copier. If database backup
-   is necessary, use a consistent snapshot and reconcile its boundary with
-   native transcripts; do not independently copy a live DB/WAL/SHM set.
-2. **Confirmed remote process termination.** Stream closure, stdin EOF, and
-   process exit are different events. The generic process contract and backend
-   implementations need separate review, including PID-not-yet-known races,
-   natural exit, process groups, stale identities, and cancellation. Do not
-   globally change detached/background-task semantics to fix managed Codex.
-3. **Credential and owner races.** Continue using the existing encrypted
-   credential store/CAS. A later home change must update login, refresh,
-   logout, and materialization together. A stale owner must not republish
-   credentials or native state. This patch does not add distributed fencing.
-4. **Existing NFS layouts.** The first implementation protects new homes and
-   fails clearly on unsafe legacy tmp directories; it does not automatically
-   recover already blocked agents. Do not roll it out as an unattended repair.
+## Offline migration of existing NFS homes
 
-## Migration and rollback gates
+An operator must first stop admissions for the exact Agent, drain **all**
+server owners, and confirm native processes have exited. This condition cannot
+be inferred from local PID inspection alone. Keep admission stopped until
+migration finishes. In the target workspace, run the reviewed repository helper
+with the toolkit Python:
 
-Before a follow-up migration, stop admitting new work for the exact Agent,
-drain every app-server owner, and confirm the relevant processes have exited.
-Only then archive the old transient directory with a recoverable, bounded
-operation and publish the new layout. Do not infer ownership from PID alone,
-or recurse through symlinks. Credentials, sessions and user files must remain
-unchanged. No automated migration command is provided in this first patch.
+```sh
+/opt/memoh/toolkit/bin/python3 -I runtime_storage.py \
+  --migrate-drained /data/.codex/agents/<agent-id>
+```
 
-Persist the latest recoverable native state before workspace replacement.
-If a future change alters native storage format, rollback requires proving
-the old version can read the new state, not merely switching an image tag.
-Missing native state must not be presented as a successful original-thread
-resume. Do not replay side-effecting tools automatically to rebuild state.
+`--migrate-drained` explicitly declares that the operator established the
+cross-instance drain. The helper additionally rejects visible local processes
+with this CODEX_HOME and refuses to proceed when it cannot inspect them.
 
-## OSS versus provider integration
+Migration checks the dedicated persistent volume and copies the offline native
+tree into a private staging directory on it. It never follows source symlinks
+or copies special files; resolve unsupported layouts explicitly first. Only the
+top-level tmp tree is omitted from the new home, while the original copy stays
+in the archive. Other nested directories named tmp are preserved.
 
-| Concern | Owner |
-| --- | --- |
-| Codex layout policy, safe preparation, helper compatibility | OSS driver |
-| Generic managed-process lifecycle and error reporting | OSS process/bridge contract, follow-up |
-| Native session persistence and credential invariants | OSS driver and existing state store, follow-up |
-| Provider-specific terminate/wait, sandbox generation validation | Provider adapter, not Codex driver |
-| NFS mount configuration, template distribution, pause/resume tests | Deployment/provider integration |
+SQLite DB and WAL files are copied only as a **quiescent set**, after draining;
+there is no live DB/WAL/SHM copier. Validation and WAL checkpoint run against the
+local staged databases, never against the NFS source, so broken NLM does not
+block the migration's SQLite validation. Database validation failure leaves the
+source untouched. The target and marker are fsynced before publication.
 
-Do not add provider names, credentials, production identifiers, or conditional
-`if hosted` behavior to the generic driver. No schema migration, template
-change, frontend API change, or other Agent's storage policy is included here.
+After rechecking local owners and the source directory identity, migration
+renames the original directory to
+`<agent-id>.before-native-storage-<unique-id>` and installs the managed link.
+The complete original directory, including tmp and credentials, remains there.
+No source data is deleted. If the operation fails between rename and link
+publication, preserve the target/archive and reconcile them while still drained;
+startup refuses an orphaned nonempty target instead of guessing.
 
-## Verification
+There is no unattended migration and no automatic stale-owner takeover.
 
-Automated tests cover missing/existing/dangling layouts, immutable durable
-sentinels, repeated and concurrent preparation, distinct agents, unknown
-filesystems, mocked network mounts, symlink attacks, unsafe permissions,
-clean execution environment, sanitized errors, and bounded preparation.
+## Recovery and rollback
+
+- Reattach the **same persistent native volume** during workspace replacement.
+  Fixed addressed home paths and intact SQLite/transcripts allow native resume,
+  fork and compaction to use the same state. An empty substitute volume fails
+  its identity check.
+- On `thread/resume` failure, Memoh now reports the stable external-runtime
+  unavailable error instead of automatically creating a new native thread.
+  Explicit `ForceFreshRuntime` behavior remains available where already intended
+  (for example Discuss). Recovery must not silently discard native context or
+  replay side-effecting tools.
+- An immediate rollback before admitting any new work can restore the archived
+  directory after all processes are drained. After new work has been admitted,
+  the archive is stale: rollback needs a quiescent copy of the **current** native
+  home and a compatibility check against the old CLI. Restoring the old archive
+  blindly would lose newly created native state.
+- Reverting the Memoh code does not undo storage publication. The addressed home
+  still resolves to the persistent native directory; retain the volume and
+  verify old-version compatibility. Do not remove the volume as part of an image
+  rollback.
+
+## Verification and rollout boundaries
+
+Unit tests cover local-layout preservation, concurrent home publication,
+volume/marker identity, wrong or missing volumes, symlink and permission checks,
+refusal of live/legacy layouts, orphan detection, and offline migration with a
+committed WAL, credential sentinel and native transcript preservation.
 
 ```sh
 go test ./internal/agent/runtime/codex/... ./internal/agent/runtime/agentprocess/...
-python3 -I internal/agent/runtime/codex/runtime_tmp_test.py -v
+python3 -I internal/agent/runtime/codex/runtime_storage_test.py -v
 ```
 
-The optional offline smoke test must run in a disposable Linux workspace with
-the pinned Codex binary and a writable `/data`; it creates only a fresh test
-home. Run it with networking disabled and no credentials mounted:
+The optional real CLI test must run in a disposable Linux workspace with Codex
+0.151.0, no credentials and networking restricted to the test NFS server:
 
 ```sh
-python3 -I internal/agent/runtime/codex/runtime_tmp_live_test.py /path/to/codex /data
+python3 -I internal/agent/runtime/codex/runtime_storage_live_test.py /path/to/codex /data
 ```
 
-It starts two app-servers, checks both initialize, confirms the second janitor
-does not remove the first process's helper, executes the native apply_patch
-aliases, checks durable sentinels, and verifies EOF exit/arg0 cleanup. It does
-not exercise the bridge, OAuth, model/tool turns, native resume, or real NFS.
+When /data is NFS, mount the dedicated persistent local volume first. Verify
+actual NFSv3/NLM fault injection, native helpers, migration under broken NLM,
+bridge start/close, and workspace replacement with both correct and wrong
+volumes. A successful initialize alone does not establish real-model behavior.
 
-Before ready-for-review/release, separately validate real NFSv3 failure and
-remount behavior; OAuth refresh; complete multi-step turns; native
-resume/fork/compaction across server restart and workspace replacement;
-multiple server owners; failure cleanup; and rollback. Mocked filesystem
-classification and passing initialize are not substitutes for these gates.
+The original real-NFS experiment also verified the bridge helper timeout during
+full NFS outage, normal bridge process lifecycle, and tmp recreation after
+remount/replacement. An extra NFSv4.1 attempt hit ordinary directory I/O errors
+in the test environment, so it was not counted as compatibility evidence.
 
-## Related prior art
+Before production rollout, the deployment owner must validate persistent-volume
+provisioning/retention/single attachment and its own backup/restore path. Real
+OAuth refresh, multi-step model turns, provider-specific terminate/wait,
+cross-instance fencing and production rollback require separate verification.
+No local filesystem check or offline smoke test substitutes for those gates.
 
-- [VS Code Remote-SSH local lockfiles](https://github.com/microsoft/vscode-docs/blob/main/remote-release-notes/v1_37.md)
-- [IPython local history database configuration](https://ipython.readthedocs.io/en/stable/api/generated/IPython.core.history.html)
-- [OpenCode NFS proposal, closed without merge](https://github.com/anomalyco/opencode/pull/15131)
-- [SQLite WAL restrictions](https://sqlite.org/wal.html)
-- [SQLite consistent backup API](https://sqlite.org/backup.html)
-- [OpenHands explicit conversation persistence](https://docs.openhands.dev/sdk/guides/convo-persistence)
+### Revised implementation: local verification
+
+The revised implementation was exercised with real NFSv3 plus a separate Docker
+named volume backed by ext4, using Codex 0.151.0:
+
+| Check | Result |
+| --- | --- |
+| NLM TCP/UDP 32803 blocked, two fresh managed app-servers | Both initialize; native apply_patch aliases work; clean EOF exit. |
+| Existing NFS home with a completed native turn, NLM blocked during offline migration | Same thread ID, transcript and installation ID; resumed turn and native fork succeed. |
+| Entire workspace container replaced, same NFS data and native ext4 volumes reattached, NLM blocked | Same thread and installation ID recovered; another turn and native fork succeed. |
+| Existing addressed home with a different empty native volume | Refused with `native_volume_identity_mismatch`; no fresh native thread is substituted. |
+| Actual Go driver preparation / bridge Exec / pinned CLI | Three starts pass; stale helper is reaped while the other live helper survives; no matching live native process remains after Close. |
+| Python filesystem suite | 26 tests pass, including committed WAL migration and corruption refusal. |
+| Go runtime, error catalog, server and handlers | Targeted suites pass with race instrumentation; Codex golangci-lint passes. |
+
+Recovery turns used a deterministic loopback Responses fixture, not a real
+model provider. This proves native protocol/state round trips, not model quality,
+OAuth refresh, or compaction correctness. The fixture is available as
+`runtime_storage_recovery_test.py`; use `create`, `migrate`, and `verify` in
+sequence in disposable workspaces, keeping `/results` for its test thread ID.
+Do not run its fixed test home against user data. The live filesystem detector
+cannot verify retention policies or physical volume single attachment.

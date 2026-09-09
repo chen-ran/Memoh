@@ -1,6 +1,6 @@
 """Offline smoke test; run only in a disposable Linux workspace/container.
 
-Usage: python3 -I runtime_tmp_live_test.py /path/to/pinned/codex /data
+Usage: python3 -I runtime_storage_live_test.py /path/to/pinned/codex /data
 The parent directory must exist. Only a newly allocated test home is modified.
 This does not test OAuth, model calls, NFS remounts or native thread recovery.
 """
@@ -18,7 +18,7 @@ import time
 
 
 spec = importlib.util.spec_from_file_location(
-    "runtime_tmp", Path(__file__).with_name("runtime_tmp.py")
+    "runtime_storage", Path(__file__).with_name("runtime_storage.py")
 )
 layout = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(layout)
@@ -56,13 +56,14 @@ def main(binary, parent):
     if not Path(binary).is_absolute():
         raise AssertionError("provide an absolute binary path")
     version = subprocess.check_output([binary, "--version"], text=True).strip()
+    assert version == "codex-cli 0.151.0", "test requires the pinned Codex version"
     with tempfile.TemporaryDirectory(prefix="memoh-codex-layout-test-", dir=parent) as name:
-        home = Path(name)
+        home = Path(name) / "home"
+        assert layout.prepare(str(home)) in ("local", "isolated")
         (home / "config.toml").write_text("# smoke-test configuration\n")
         sentinel = home / "sessions" / "preserved.txt"
         sentinel.parent.mkdir()
         sentinel.write_text("native data must remain durable")
-        assert layout.prepare(str(home)) == "isolated"
         target = (home / "tmp").resolve()
         processes = []
         started = time.monotonic()

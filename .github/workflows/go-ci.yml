@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "**/*.go"
+      - "internal/agent/runtime/codex/*.py"
       - "go.mod"
       - "go.sum"
       - ".golangci.yml"
@@ -17,6 +18,7 @@ on:
     branches: ["main"]
     paths:
       - "**/*.go"
+      - "internal/agent/runtime/codex/*.py"
       - "go.mod"
       - "go.sum"
       - ".golangci.yml"

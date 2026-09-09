@@ -403,37 +403,10 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	if ctx.Err() != nil {
 		return "", false, fmt.Errorf("codex thread/resume: %w", err)
 	}
-	// The stored thread no longer exists on the codex side (wiped state,
-	// version change). A session that can never run again is worse than one
-	// that lost its runtime-side context: fall back to a fresh thread and
-	// persist the new id.
-	d.logger.Warn("codex thread/resume failed; starting a fresh thread",
-		slog.String("thread_id", threadID), slog.Any("error", err))
-	freshConfig, bindFresh, err2 := d.prepareThreadTools(srv, input)
-	if err2 != nil {
-		return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err2, map[string]string{"runtime": RuntimeType})
-	}
-	startParams := protocol.ThreadStartParams{
-		Cwd:            &cwd,
-		ApprovalPolicy: &approvalPolicy,
-		Config:         freshConfig,
-	}
-	if cfg.Model != "" {
-		startParams.Model = &cfg.Model
-	}
-	var startResp protocol.ThreadStartResponse
-	if startErr := srv.conn.Call(ctx, protocol.MethodThreadStart, startParams, &startResp); startErr != nil {
-		bindFresh("")
-		return "", false, fmt.Errorf("codex thread/start after failed resume: %w", errors.Join(startErr, err))
-	}
-	if startResp.Thread.ID == "" {
-		bindFresh("")
-		return "", false, errors.New("codex thread/start returned no thread id")
-	}
-	bindFresh(startResp.Thread.ID)
-	srv.markThreadLoaded(startResp.Thread.ID)
-	srv.setThreadToolless(startResp.Thread.ID, freshConfig == nil)
-	return startResp.Thread.ID, true, nil
+	// A missing native volume or transcript must not silently replace a stored
+	// thread with a fresh one. Only ForceFreshRuntime above opts into a reset.
+	return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable,
+		fmt.Errorf("codex thread/resume: %w", err), map[string]string{"runtime": RuntimeType})
 }
 
 // interruptTurn asks the app-server to stop the running turn; it runs on a
@@ -490,8 +463,15 @@ func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error
 	if err != nil {
 		return nil, fmt.Errorf("workspace info for bot %s: %w", botID, err)
 	}
+	// Prepare before materializing credentials: creating an NFS home first
+	// would turn a fresh Agent into a legacy layout requiring offline migration.
+	if err := prepareRuntimeStorage(ctx, client, codexHome(botAgentID)); err != nil {
+		return nil, err
+	}
 	if cfg.Auth == AuthChatGPT && credential.ID != "" {
-		if err := materializeChatGPTCredential(ctx, client, botAgentID, credential); err != nil {
+		authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := materializeChatGPTCredential(authCtx, client, botAgentID, credential); err != nil {
 			return nil, external.CredentialError(err)
 		}
 	}
