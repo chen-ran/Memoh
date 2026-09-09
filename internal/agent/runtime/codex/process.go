@@ -21,6 +21,9 @@ func startAppServer(ctx context.Context, client *bridge.Client, workDir, home st
 	if err := client.Mkdir(ctx, home); err != nil {
 		return nil, fmt.Errorf("create codex home %s: %w", home, err)
 	}
+	if err := prepareRuntimeTmp(ctx, client, home); err != nil {
+		return nil, err
+	}
 	if err := materializeCodexConfig(ctx, client, home, cfg); err != nil {
 		return nil, err
 	}
