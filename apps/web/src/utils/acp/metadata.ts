@@ -1,3 +1,4 @@
+import { randomUUID } from '@/utils/uuid'
 import { normalizeAgentID } from '@/utils/external-agent'
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
 
@@ -234,10 +235,7 @@ function isSensitiveManagedField(field: AcpprofileManagedField): boolean {
 }
 
 function randomID(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  return randomUUID()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
