@@ -94,8 +94,7 @@ export interface RuntimeIntegrationDeps {
     turn: ChatMessage,
   ) => void
   sendFailedMessage: () => string
-  connectionLostMessage: () => string
-  firstSendTimeoutMessage: () => string
+  sendOutcomeUnknownMessage: () => string
   touchSessionInList: (sessionId: string, updatedAt?: string) => void
 }
 
@@ -109,6 +108,21 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     runId: string
     botId: string
   }>()
+
+  // A held first send that ended without the server's answer: its run may
+  // have been taken, so the send keeps its session (see StreamFailureError).
+  function sendOutcomeUnknownError() {
+    return new StreamFailureError(deps.sendOutcomeUnknownMessage(), 'startup', undefined, { outcomeUnknown: true })
+  }
+
+  // A first send resent into the session the server created for it can find
+  // its own run still holding that session: a skill activation reserves the
+  // session before admission looks up the invocation, so the resend is told
+  // the session is busy. Nothing but this send has used that session, so busy
+  // is no refusal of it.
+  function resendFoundSessionBusy(invocationId: string, code: string | undefined): boolean {
+    return code?.trim() === 'session_runtime.session_busy' && deps.firstSend.isResent(invocationId)
+  }
 
   function handleSessionCreated(
     event: { invocation_id: string; session_id: string; workdir_id?: string },
@@ -155,6 +169,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     }
     const workdirId = (event.workdir_id ?? '').trim()
     deps.firstSend.admit(event.invocation_id, sessionId, workdirId)
+    // From here a resend after a reconnect goes to this session, where the
+    // server answers it with the run the invocation already has.
+    deps.realtime.bindWebSocketRequestSession(botId, event.invocation_id, sessionId)
     replayDeferredAbort(event.invocation_id, sessionId)
     // A held first send stays a draft until run_accepted reveals it; the
     // server can still refuse the run after creating the session.
@@ -332,7 +349,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        new StreamFailureError(message, stage, event),
+        resendFoundSessionBusy(invocationId, event.code)
+          ? sendOutcomeUnknownError()
+          : new StreamFailureError(message, stage, event),
       )
       return
     }
@@ -349,7 +368,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (event.type === 'command_error' && invocationId && pending) {
         deps.assistantStreams.rejectAssistantStream(
           invocationId,
-          new CommandStreamError(commandActionErrorMessage(event), event),
+          resendFoundSessionBusy(invocationId, event.code)
+            ? sendOutcomeUnknownError()
+            : new CommandStreamError(commandActionErrorMessage(event), event),
         )
       }
       return
@@ -600,27 +621,35 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     deps.chatViews.prune()
   }
 
-  // A socket that closes before a held first send is confirmed fails it: the
-  // reliable request would otherwise wait for a reconnect indefinitely while
-  // the pane shows a locked composer. Its queued resend is dropped, so a later
-  // reconnect cannot start the run the user was told failed.
+  // A socket that closes before a held first send is confirmed loses the
+  // answer, not necessarily the send: the server may have taken the run.
+  // Once the server has named the send's session, the reconnect resends the
+  // request into it (see bindWebSocketRequestSession) and the server answers
+  // with the run the invocation already has, so the send keeps waiting; the
+  // confirmation timeout still bounds the wait. Before that a resend would
+  // create a second session, so the send ends with its outcome unknown and
+  // the queued resend is dropped.
   function handleWebSocketClosed(botId: string) {
     const bid = botId.trim()
     for (const invocationId of deps.firstSend.awaitingConfirmationIds()) {
       const pending = deps.assistantStreams.getAssistantStream(invocationId)
       if (!pending || pending.botId.trim() !== bid) continue
+      if (deps.firstSend.entryForInvocation(invocationId)?.sessionId) {
+        deps.firstSend.markResent(invocationId)
+        continue
+      }
       deps.realtime.forgetWebSocketRequest(bid, invocationId)
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        new StreamFailureError(deps.connectionLostMessage(), 'startup'),
+        sendOutcomeUnknownError(),
       )
     }
   }
 
-  // Fails a held first send the server has not confirmed in time, like a
-  // dropped socket does. The stop is recorded too, so a run_accepted that
-  // still arrives aborts the run instead of leaving it going unwatched.
-  // Returns the cancel for the send to call once it settles.
+  // Ends a held first send the server has not confirmed in time, with its
+  // outcome unknown. The stop is recorded too, so a run_accepted that still
+  // arrives aborts the run instead of leaving it going unwatched. Returns the
+  // cancel for the send to call once it settles.
   function watchFirstSendConfirmation(invocationId: string): () => void {
     const timer = setTimeout(() => {
       if (!deps.firstSend.isAwaitingConfirmation(invocationId)) return
@@ -630,7 +659,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       abortRun(invocationId)
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        new StreamFailureError(deps.firstSendTimeoutMessage(), 'startup'),
+        sendOutcomeUnknownError(),
       )
     }, FIRST_SEND_CONFIRM_TIMEOUT_MS)
     return () => clearTimeout(timer)
