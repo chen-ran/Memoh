@@ -62,6 +62,7 @@ func TestPublicCodeClassifiesCausesWithoutTheirText(t *testing.T) {
 		{"canceled", fmt.Errorf("step: %w", context.Canceled), apperror.CodeCanceled},
 		{"unknown", errors.New("bridge dial 10.0.0.8 password=secret"), apperror.CodeAppOperationFailed},
 		{"upstream rejected the request", &connectsdk.APIError{StatusCode: http.StatusBadRequest, Message: "payload rejected"}, apperror.CodeConnectorRequestRejected},
+		{"upstream has no OAuth App", &connectsdk.APIError{StatusCode: http.StatusUnprocessableEntity, Code: "oauth_client_not_configured", Message: "client_secret=hidden"}, apperror.CodeConnectorOAuthClientNotConfigured},
 		{"upstream missing object", &connectsdk.APIError{StatusCode: http.StatusNotFound, Message: "no such connection"}, apperror.CodeConnectorNotFound},
 		{"upstream failure", &connectsdk.APIError{StatusCode: http.StatusInternalServerError, Message: "500"}, apperror.CodeConnectorUpstreamUnavailable},
 		{"transport failure", fmt.Errorf("call connect-it: %w", connectors.ErrUpstreamUnavailable), apperror.CodeConnectorUpstreamUnavailable},

@@ -618,6 +618,7 @@
       "conflict": "该连接器与现有连接冲突。",
       "not_configured": "此服务器尚未配置连接器，请联系管理员启用 Connect-It。",
       "not_found": "该连接器已不可用，请刷新后重新连接。",
+      "oauth_client_not_configured": "Connect-It 尚未为该连接器配置 OAuth App（Client ID 和 Client Secret）。请联系本部署的管理员或负责 Connect-It 的运营方，配置完成后再连接。",
       "operation_failed": "连接器操作失败，请重试。",
       "request_invalid": "连接器请求无效。",
       "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试。",

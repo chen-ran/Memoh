@@ -618,6 +618,7 @@
       "conflict": "This connector conflicts with an existing connection.",
       "not_configured": "Connectors are not configured on this server.",
       "not_found": "This connector is no longer available.",
+      "oauth_client_not_configured": "Connect-It has no OAuth App (Client ID and Client Secret) configured for this connector. Ask this deployment's administrator or the operator of its Connect-It to configure it, then connect again.",
       "operation_failed": "The connector operation failed. Please try again.",
       "request_invalid": "The connector request is invalid.",
       "request_rejected": "Connect-It rejected the connector request.",

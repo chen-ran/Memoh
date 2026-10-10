@@ -9,6 +9,8 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 )
 
+const connectItOAuthClientNotConfigured = "oauth_client_not_configured"
+
 // CodeOf maps a connector failure to its catalog code, or "" when err is not
 // one this package or the upstream SDK reports. HTTP responses and persisted
 // failure reasons share it so the same upstream status reads the same
@@ -23,6 +25,9 @@ func CodeOf(err error) apperror.Code {
 	}
 	var apiErr *connectsdk.APIError
 	if errors.As(err, &apiErr) {
+		if apiErr.Code == connectItOAuthClientNotConfigured {
+			return apperror.CodeConnectorOAuthClientNotConfigured
+		}
 		switch apiErr.StatusCode {
 		case http.StatusBadRequest, http.StatusUnprocessableEntity:
 			return apperror.CodeConnectorRequestRejected

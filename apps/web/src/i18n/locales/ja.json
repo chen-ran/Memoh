@@ -244,6 +244,7 @@
       "conflict": "このコネクターは既存の接続と競合しています。",
       "not_configured": "このサーバーではコネクターが設定されていません。管理者に Connect-It の有効化を依頼してください。",
       "not_found": "このコネクターは利用できなくなりました。再読み込みして接続し直してください。",
+      "oauth_client_not_configured": "Connect-It でこのコネクターの OAuth App（Client ID と Client Secret）が設定されていません。このデプロイの管理者、または Connect-It の運用担当者に設定を依頼し、完了後にもう一度接続してください。",
       "operation_failed": "コネクターの操作に失敗しました。もう一度お試しください。",
       "request_invalid": "コネクターのリクエストが無効です。",
       "request_rejected": "Connect-It がコネクターのリクエストを拒否しました。入力内容を確認して、もう一度お試しください。",
@@ -3994,6 +3995,10 @@
     "oauthPopupBlocked": "認証ウィンドウがブロックされました。このページのポップアップを許可して再試行してください。",
     "connectedSuccess": "{name} に接続しました",
     "connectFailed": "サービスに接続できませんでした",
+    "oauthAppNotConfigured": {
+      "admin": "Connect-It で {connector} の OAuth App（Client ID と Client Secret）が設定されていません。このデプロイの Connect-It 管理コンソールにアクセスできる場合は、{connector} コネクターの設定ページで入力してから、もう一度接続してください。アクセスできない場合は、Connect-It の運用担当者に依頼してください。",
+      "member": "Connect-It で {connector} の OAuth App（Client ID と Client Secret）が設定されていません。このデプロイの管理者、または Connect-It の運用担当者に設定を依頼し、完了後にもう一度接続してください。"
+    },
     "status": {
       "active": "接続済み",
       "pending": "認証待ち",

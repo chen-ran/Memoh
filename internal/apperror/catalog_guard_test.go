@@ -339,6 +339,7 @@ var declaredFaults = map[Code]Fault{
 	CodeMCPOAuthDiscoveryFailed:            FaultDependency,
 	CodeExternalRuntimeUsageLimited:        FaultDependency,
 	CodeACPConfigUpdateFailed:              FaultDependency,
+	CodeConnectorOAuthClientNotConfigured:  FaultDependency,
 	CodeExternalRuntimeRateLimited:         FaultDependency,
 	CodeExternalRuntimeOverloaded:          FaultDependency,
 	CodeExternalRuntimeUpstreamUnreachable: FaultDependency,
