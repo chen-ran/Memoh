@@ -115,13 +115,14 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     return new StreamFailureError(deps.sendOutcomeUnknownMessage(), 'startup', undefined, { outcomeUnknown: true })
   }
 
-  // A first send resent into the session the server created for it can find
-  // its own run still holding that session: a skill activation reserves the
-  // session before admission looks up the invocation, so the resend is told
-  // the session is busy. Nothing but this send has used that session, so busy
-  // is no refusal of it.
-  function resendFoundSessionBusy(invocationId: string, code: string | undefined): boolean {
-    return code?.trim() === 'session_runtime.session_busy' && deps.firstSend.isResent(invocationId)
+  // A refusal of a resent first send refuses the resend, not the send. The
+  // server checks access, the workspace target and, for a skill activation,
+  // whether the session is free (its own run still holding it reads as busy)
+  // before admission looks the invocation up, so a refusal says nothing about
+  // whether the first attempt's run was taken. Only a confirmation or the
+  // timeout settles that; until then the send keeps its session.
+  function refusalOf(invocationId: string, refusal: StreamFailureError): StreamFailureError {
+    return deps.firstSend.isResent(invocationId) ? sendOutcomeUnknownError() : refusal
   }
 
   function handleSessionCreated(
@@ -349,9 +350,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        resendFoundSessionBusy(invocationId, event.code)
-          ? sendOutcomeUnknownError()
-          : new StreamFailureError(message, stage, event),
+        refusalOf(invocationId, new StreamFailureError(message, stage, event)),
       )
       return
     }
@@ -368,9 +367,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (event.type === 'command_error' && invocationId && pending) {
         deps.assistantStreams.rejectAssistantStream(
           invocationId,
-          resendFoundSessionBusy(invocationId, event.code)
-            ? sendOutcomeUnknownError()
-            : new CommandStreamError(commandActionErrorMessage(event), event),
+          refusalOf(invocationId, new CommandStreamError(commandActionErrorMessage(event), event)),
         )
       }
       return
@@ -416,7 +413,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        new StreamFailureError(message, stage, event),
+        refusalOf(invocationId, new StreamFailureError(message, stage, event)),
       )
     }
   }

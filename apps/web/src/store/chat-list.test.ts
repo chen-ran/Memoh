@@ -4119,7 +4119,15 @@ describe('chat-list store', () => {
       expect(api.deleteSession).not.toHaveBeenCalled()
     })
 
-  it('keeps the session when the resent first send finds its own run holding it', async () => {
+  // A refusal of the resend says nothing about the first attempt: the server
+  // refuses before admission looks the invocation up (access, workspace
+  // target, a skill activation finding its own run holding the session).
+  it.each([
+    ['an error frame', { type: 'error', code: 'workspace_target.unavailable', message: 'target offline' }],
+    ['a rejected run', { type: 'run_rejected', code: 'session_runtime.ledger_unavailable', message: 'ledger unavailable' }],
+    ['a command error', { type: 'command_error', terminal: true, code: 'slash.unknown', message: 'unknown command' }],
+    ['a busy session', { type: 'command_error', terminal: true, code: 'session_runtime.session_busy', message: 'session busy' }],
+  ] as const)('keeps the session when the resent first send is refused with %s', async (_, refusal) => {
       h.manualSessionCreation = true
       h.sendUpdates = []
       h.acceptRuns = false
@@ -4135,17 +4143,7 @@ describe('chat-list store', () => {
       socket.onClose?.()
       await flushPromises()
 
-      // A skill activation reserves its session before admission, so the
-      // resend of one whose run is still going is told the session is busy.
-      // The session exists only for this send: busy does not refuse it.
-      h.streamHandler?.({
-        type: 'command_error',
-        invocation_id: invocationId,
-        session_id: 'created-session',
-        terminal: true,
-        code: 'session_runtime.session_busy',
-        message: 'session busy',
-      })
+      h.streamHandler?.({ ...refusal, invocation_id: invocationId, session_id: 'created-session' })
       const result = await sending
 
       expect(result).toMatchObject({ ok: false, stage: 'startup', restoreInput: 'hello' })
