@@ -10,3 +10,9 @@ Captured from the local dev environment (Compose project `memoh-pr1607`, web htt
 ## 0a46e205c (sign-in ordering)
 
 - `signin-tab1-code.png`, `signin-tab1-replaced.png`, `signin.log`: on a throwaway Grok account Agent, a second tab's sign-in replaces the first (one sign-in process at a time; the first tab's poll answers `unknown`). Deleting the Agent while the second sign-in is pending ends its process at once; its next poll answers 404.
+
+## Rebased onto main (f2804f90b)
+
+After #1606 was squash-merged, the branch was rebased onto main; commit SHAs changed (5e4dbbfc8 → b6209698a, 0a46e205c → 5328e0934, 44cb1a275 → 1be70e0a9), and f2804f90b drops the field #1591 removed.
+
+- `final-main-status.png`: on f2804f90b, a Grok turn replies and `/status` answers.
