@@ -1,0 +1,6 @@
+2026-10-18T17:24:33.386Z tab1 code shown; procs: "8084       3 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T17:24:42.130Z tab2 code shown; procs: "8195       1 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T17:24:42.187Z tab1 told its sign-in ended; tab1 polls: ["POST poll 200 {\"status\":\"pending\"}\n","POST poll 200 {\"status\":\"unknown\"}\n"]
+2026-10-18T17:24:42.225Z agent DELETE: 204
+2026-10-18T17:24:43.858Z procs after delete: ""
+2026-10-18T17:24:47.909Z tab2 polls: ["POST poll 200 {\"status\":\"pending\"}\n","POST poll 404 {\"type\":\"urn:memoh:error:bot_agent.not_found\",\"status\":404,\"detail\":\"This Agent is no longer available.\",\"code\":\"bot_agent.not_found\",\"args\":{},\"fault\":\"client\""]
