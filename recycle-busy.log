@@ -1,0 +1,15 @@
+2026-10-18T16:09:52.937Z procs before: "7396      11 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T16:09:52.980Z A sent
+2026-10-18T16:09:57.877Z procs with A sleeping: "7396      15 /usr/local/bin/grok agent --no-leader stdio\n   7485       1 sleep 60"
+2026-10-18T16:09:57.902Z agent PATCH (recycle): 200
+2026-10-18T16:09:57.936Z B sent
+2026-10-18T16:09:59.077Z t+1s procs: "7396      17 /usr/local/bin/grok agent --no-leader stdio\n   7485       2 sleep 60"
+2026-10-18T16:10:04.312Z t+6s procs: "7396      22 /usr/local/bin/grok agent --no-leader stdio\n   7485       7 sleep 60"
+2026-10-18T16:10:09.524Z t+11s procs: "7396      27 /usr/local/bin/grok agent --no-leader stdio\n   7485      12 sleep 60"
+2026-10-18T16:10:14.726Z t+17s procs: "7396      32 /usr/local/bin/grok agent --no-leader stdio\n   7485      17 sleep 60"
+2026-10-18T16:10:19.944Z t+22s procs: "7396      38 /usr/local/bin/grok agent --no-leader stdio\n   7485      23 sleep 60"
+2026-10-18T16:10:25.151Z t+27s procs: "7396      43 /usr/local/bin/grok agent --no-leader stdio\n   7485      28 sleep 60"
+2026-10-18T16:10:28.195Z B shows busy after 30 s
+2026-10-18T16:10:28.195Z B reply: "" after 30 s
+2026-10-18T16:11:00.521Z A reply: "我在前台执行 `sleep 60`，结束后只回复约定结果。BUSY-A-DONE"
+2026-10-18T16:11:02.224Z agent metadata restored: 200

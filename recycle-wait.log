@@ -1,0 +1,16 @@
+2026-10-18T16:08:49.154Z procs before: "7177      11 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T16:08:49.192Z A sent
+2026-10-18T16:08:54.036Z procs with A sleeping: "7177      15 /usr/local/bin/grok agent --no-leader stdio\n   7268       1 sleep 20"
+2026-10-18T16:08:54.060Z agent PATCH (recycle): 200
+2026-10-18T16:08:54.084Z B sent
+2026-10-18T16:08:55.221Z t+1s procs: "7177      17 /usr/local/bin/grok agent --no-leader stdio\n   7268       2 sleep 20"
+2026-10-18T16:09:00.454Z t+6s procs: "7177      22 /usr/local/bin/grok agent --no-leader stdio\n   7268       7 sleep 20"
+2026-10-18T16:09:05.656Z t+11s procs: "7177      27 /usr/local/bin/grok agent --no-leader stdio\n   7268      12 sleep 20"
+2026-10-18T16:09:10.874Z t+17s procs: "7177      32 /usr/local/bin/grok agent --no-leader stdio\n   7268      17 sleep 20"
+2026-10-18T16:09:16.083Z t+22s procs: "7307       0 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T16:09:21.270Z t+27s procs: "7307       5 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T16:09:26.436Z t+32s procs: "7307      11 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T16:09:26.439Z B reply: "WAIT-B-DONE" after 32 s
+2026-10-18T16:09:26.483Z A reply: "我在前台执行 `sleep 20`，结束后只回复约定结果。WAIT-A-DONE"
+2026-10-18T16:09:28.177Z procs after: "7307      12 /usr/local/bin/grok agent --no-leader stdio"
+2026-10-18T16:09:28.182Z agent metadata restored: 200
