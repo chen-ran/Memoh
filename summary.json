@@ -1,0 +1,52 @@
+{
+  "model": "mimo-v2.6-pro",
+  "order": [
+    "A1",
+    "A2",
+    "B1",
+    "A3"
+  ],
+  "turns": [
+    {
+      "turn": "A1",
+      "state": "completed",
+      "first_input": 23164,
+      "first_cached": 16384,
+      "first_hit_percent": 70.73,
+      "seconds": 9.04,
+      "memory_before": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n6",
+      "memory_after": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n7"
+    },
+    {
+      "turn": "A2",
+      "state": "completed",
+      "first_input": 24230,
+      "first_cached": 16384,
+      "first_hit_percent": 67.62,
+      "seconds": 7.42,
+      "memory_before": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n7",
+      "memory_after": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n8"
+    },
+    {
+      "turn": "B1",
+      "state": "completed",
+      "first_input": 19856,
+      "first_cached": 16384,
+      "first_hit_percent": 82.51,
+      "seconds": 9.73,
+      "memory_before": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n8",
+      "memory_after": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n8"
+    },
+    {
+      "turn": "A3",
+      "state": "completed",
+      "first_input": 24619,
+      "first_cached": 20480,
+      "first_hit_percent": 83.19,
+      "seconds": 7.38,
+      "memory_before": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n8",
+      "memory_after": "ecb5ac530967cac2109593c400268b8fb907b441a2af5a0f01d4a8ec29058fa4  /data/MEMORY.md\n9"
+    }
+  ],
+  "scope": "Real-provider cross-session regression; mixed-TTL expiry tested with unit tests, not real TTL waiting. No claim of latency improvement."
+}
