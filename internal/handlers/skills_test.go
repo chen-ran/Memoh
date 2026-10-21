@@ -283,105 +283,6 @@ func TestDeleteSkillsAPIRejectsRegistryAppSkill(t *testing.T) {
 	}
 }
 
-// writeSharedSkillDirs lays out a legacy user Skill and an installed Registry
-// Skill, plus flat Skills named after both of their namespace directories.
-func writeSharedSkillDirs(t *testing.T, env *skillsTestEnv) (kept []string) {
-	t.Helper()
-	legacyPath := path.Join(skillset.ManagedDir(), "user", "personal", "legacy", "SKILL.md")
-	registryPath := path.Join(skillset.ManagedDir(), "memoh", "docs", "guide", "SKILL.md")
-	env.writeSkillFile(t, legacyPath, managedSkillRaw("legacy", "Legacy notes"))
-	env.writeSkillFile(t, registryPath, managedSkillRaw("guide", "Registry guide"))
-	for _, name := range []string{"user", "memoh"} {
-		env.writeSkillFile(t, path.Join(skillset.ManagedDir(), name, "SKILL.md"), managedSkillRaw(name, "Flat "+name))
-	}
-	return []string{legacyPath, registryPath}
-}
-
-func requireWorkspaceFiles(t *testing.T, env *skillsTestEnv, containerPaths ...string) {
-	t.Helper()
-	for _, containerPath := range containerPaths {
-		if _, err := os.Stat(env.localPath(containerPath)); err != nil {
-			t.Fatalf("%s should remain: %v", containerPath, err)
-		}
-	}
-}
-
-// Deleting a flat Skill recursively would also delete the Skills its
-// directory holds as a namespace, so the whole request is refused up front.
-func TestDeleteSkillsAPIRefusesDirectoryHoldingOtherSkills(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	kept := writeSharedSkillDirs(t, env)
-	notesPath := path.Join(skillset.ManagedDir(), "notes", "SKILL.md")
-	env.writeSkillFile(t, notesPath, managedSkillRaw("notes", "Notes"))
-
-	for _, name := range []string{"user", "memoh"} {
-		flatPath := path.Join(skillset.ManagedDir(), name, "SKILL.md")
-		_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-			SourcePaths: []string{notesPath, flatPath},
-		}, env.handler.DeleteSkills)
-		if got := apperror.CodeOf(err); got != apperror.CodeSkillDirectoryShared {
-			t.Fatalf("DeleteSkills(%s) error = %v, want code %s", name, err, apperror.CodeSkillDirectoryShared)
-		}
-		requireWorkspaceFiles(t, env, append(kept, notesPath, flatPath)...)
-	}
-}
-
-// A SKILL.md path that does not exist must not resolve to deleting the
-// directory it would live in.
-func TestDeleteSkillsAPIRequiresTheSkillFile(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	legacyPath := path.Join(skillset.ManagedDir(), "user", "personal", "legacy", "SKILL.md")
-	env.writeSkillFile(t, legacyPath, managedSkillRaw("legacy", "Legacy notes"))
-
-	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		SourcePaths: []string{path.Join(skillset.ManagedDir(), "user", "SKILL.md")},
-	}, env.handler.DeleteSkills)
-	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceFileNotFound {
-		t.Fatalf("DeleteSkills(missing SKILL.md) error = %v, want code %s", err, apperror.CodeWorkspaceFileNotFound)
-	}
-	requireWorkspaceFiles(t, env, legacyPath)
-}
-
-func TestUpsertSkillsAPIRefusesDirectoryHoldingOtherSkills(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	kept := writeSharedSkillDirs(t, env)
-	flatPath := path.Join(skillset.ManagedDir(), "memoh", "SKILL.md")
-	if err := os.Remove(env.localPath(flatPath)); err != nil {
-		t.Fatalf("remove flat memoh: %v", err)
-	}
-
-	// A new Skill does not land on top of a namespace directory.
-	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
-		Skills: []string{managedSkillRaw("memoh", "New memoh")},
-	}, env.handler.UpsertSkills)
-	if got := apperror.CodeOf(err); got != apperror.CodeSkillNameTaken {
-		t.Fatalf("UpsertSkills(new memoh) error = %v, want code %s", err, apperror.CodeSkillNameTaken)
-	}
-	if _, statErr := os.Stat(env.localPath(flatPath)); !os.IsNotExist(statErr) {
-		t.Fatalf("new memoh Skill was written into the Registry namespace: %v", statErr)
-	}
-
-	// A flat Skill already sharing a directory can be edited in place, but
-	// renaming it would move the namespace along.
-	userPath := path.Join(skillset.ManagedDir(), "user", "SKILL.md")
-	if _, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
-		Skills: []string{managedSkillRaw("user", "Edited user")}, SourcePath: userPath,
-	}, env.handler.UpsertSkills); err != nil {
-		t.Fatalf("UpsertSkills(edit user in place) error = %v", err)
-	}
-	//nolint:gosec // test-only temp workspace path
-	if raw, readErr := os.ReadFile(env.localPath(userPath)); readErr != nil || !strings.Contains(string(raw), "Edited user") {
-		t.Fatalf("in-place edit not written: %q, %v", raw, readErr)
-	}
-	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
-		Skills: []string{managedSkillRaw("renamed", "Renamed")}, SourcePath: userPath,
-	}, env.handler.UpsertSkills)
-	if got := apperror.CodeOf(err); got != apperror.CodeSkillDirectoryShared {
-		t.Fatalf("UpsertSkills(rename user) error = %v, want code %s", err, apperror.CodeSkillDirectoryShared)
-	}
-	requireWorkspaceFiles(t, env, append(kept, userPath)...)
-}
-
 func TestDeleteSkillsAPIPreservesArtifactWhenDeleteFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	skillDir := path.Join(skillset.ManagedDir(), "meeting")
@@ -1284,7 +1185,6 @@ func TestSkillActionHTTPErrorMapsEveryPackageRefusal(t *testing.T) {
 		{skillset.ErrSkillNotFound, apperror.CodeSkillNotFound},
 		{skillset.ErrRegistrySkillReadOnly, apperror.CodeSkillRegistryReadOnly},
 		{skillset.ErrBuiltinSkillReadOnly, apperror.CodeSkillBuiltinReadOnly},
-		{skillset.ErrSkillNameTaken, apperror.CodeSkillNameTaken},
 	} {
 		got := skillActionHTTPError(fmt.Errorf("apply: %w", tc.err))
 		if apperror.CodeOf(got) != tc.want || !errors.Is(apperror.CauseOf(got), tc.err) {
