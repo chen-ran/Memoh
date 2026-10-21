@@ -129,6 +129,7 @@ func TestAgentResponseErrorCatalog(t *testing.T) {
 func TestSkillLayoutErrorsUseConflictContract(t *testing.T) {
 	for _, code := range []Code{
 		CodeSkillBuiltinReadOnly,
+		CodeSkillDirectoryShared,
 	} {
 		definition, ok := Lookup(code)
 		if !ok {

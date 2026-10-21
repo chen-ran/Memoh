@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
@@ -130,6 +131,67 @@ func TestApplyActionAdoptAndDisable(t *testing.T) {
 	idx := readIndex(context.Background(), client)
 	if !idx.Overrides[externalPath].Disabled {
 		t.Fatalf("expected disabled override for %s", externalPath)
+	}
+}
+
+// A flat Skill whose name is also a namespace directory must not be adopted
+// into that directory: deleting it later would take the namespace along.
+func TestApplyActionAdoptRefusesDirectoryHoldingOtherSkills(t *testing.T) {
+	client := newFakeClient()
+	externalPath := pathJoin("/data/.agents/skills", "memoh", "SKILL.md")
+	client.listings["/data/.agents/skills"] = []*pb.FileEntry{{Path: "memoh", IsDir: true}}
+	client.files[externalPath] = "---\nname: memoh\ndescription: Memoh notes\n---\n\n# Memoh"
+	registrySkill := pathJoin(ManagedDirPath, "memoh", "docs", "guide")
+	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "memoh", IsDir: true}}
+	client.listings[pathJoin(ManagedDirPath, "memoh")] = []*pb.FileEntry{{Path: "docs", IsDir: true}}
+	client.listings[pathJoin(ManagedDirPath, "memoh", "docs")] = []*pb.FileEntry{{Path: "guide", IsDir: true}}
+	client.listings[registrySkill] = []*pb.FileEntry{{Path: "SKILL.md"}}
+	client.files[pathJoin(registrySkill, "SKILL.md")] = "---\nname: guide\ndescription: Guide\n---\n\n# Guide"
+
+	err := ApplyAction(context.Background(), client, nil, ActionRequest{Action: ActionAdopt, TargetPath: externalPath})
+	if !errors.Is(err, ErrSkillNameTaken) {
+		t.Fatalf("adopt error = %v, want ErrSkillNameTaken", err)
+	}
+	if _, ok := client.files[pathJoin(ManagedDirPath, "memoh", "SKILL.md")]; ok {
+		t.Fatal("adopt wrote a flat Skill into the Registry namespace")
+	}
+}
+
+func TestHoldsNamespacedSkills(t *testing.T) {
+	ctx := context.Background()
+	client := newFakeClient()
+	// The user compatibility directory holds a legacy user Skill.
+	client.listings["/data/skills/user"] = []*pb.FileEntry{{Path: "personal", IsDir: true}}
+	client.listings["/data/skills/user/personal"] = []*pb.FileEntry{{Path: "legacy", IsDir: true}}
+	client.listings["/data/skills/user/personal/legacy"] = []*pb.FileEntry{{Path: "SKILL.md"}}
+	// A flat Skill that shares its directory with a Registry namespace.
+	client.listings["/data/skills/memoh"] = []*pb.FileEntry{{Path: "SKILL.md"}, {Path: "docs", IsDir: true}}
+	client.listings["/data/skills/memoh/docs"] = []*pb.FileEntry{{Path: "guide", IsDir: true}}
+	client.listings["/data/skills/memoh/docs/guide"] = []*pb.FileEntry{{Path: "SKILL.md"}}
+	// A flat Skill whose resource folders hold no Skill.
+	client.listings["/data/skills/notes"] = []*pb.FileEntry{{Path: "SKILL.md"}, {Path: "references", IsDir: true}}
+	client.listings["/data/skills/notes/references"] = []*pb.FileEntry{{Path: "api.md"}, {Path: "drafts", IsDir: true}}
+	client.listings["/data/skills/notes/references/drafts"] = []*pb.FileEntry{{Path: "old.md"}}
+
+	for dir, want := range map[string]bool{
+		"/data/skills/user":                 true,
+		"/data/skills/memoh":                true,
+		"/data/skills/notes":                false,
+		"/data/skills/missing":              false,
+		"/data/skills/user/personal/legacy": false,
+	} {
+		got, err := HoldsNamespacedSkills(ctx, client, dir)
+		if err != nil {
+			t.Fatalf("HoldsNamespacedSkills(%s) error = %v", dir, err)
+		}
+		if got != want {
+			t.Fatalf("HoldsNamespacedSkills(%s) = %v, want %v", dir, got, want)
+		}
+	}
+
+	client.listErrors["/data/skills/memoh/docs"] = errors.New("workspace unavailable")
+	if _, err := HoldsNamespacedSkills(ctx, client, "/data/skills/memoh"); err == nil {
+		t.Fatal("a listing failure must not read as an unshared directory")
 	}
 }
 
@@ -689,7 +751,7 @@ func (f *fakeClient) ListDirAll(_ context.Context, p string, _ bool) ([]*pb.File
 	}
 	items, ok := f.listings[p]
 	if !ok {
-		return nil, io.EOF
+		return nil, bridge.ErrNotFound
 	}
 	return items, nil
 }
