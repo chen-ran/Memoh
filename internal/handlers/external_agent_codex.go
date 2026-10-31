@@ -117,15 +117,10 @@ func (h *ExternalAgentCodexHandler) Usage(c echo.Context) error {
 }
 
 // codexUsageError translates a failed usage read: an Agent credential or
-// runtime failure by its kind, and a rejected sign-in or an unreadable usage
-// endpoint by its own code.
+// runtime failure by its kind, and usage Codex could not read by its own code.
 func codexUsageError(err error) error {
-	switch {
-	case errors.Is(err, codexruntime.ErrUsageSignInExpired):
-		return apperror.Wrap(apperror.CodeAgentCredentialUsageAuthExpired, err, nil)
-	case errors.Is(err, codexruntime.ErrUsageUnavailable):
+	if errors.Is(err, codexruntime.ErrUsageUnavailable) {
 		return apperror.Wrap(apperror.CodeAgentCredentialUsageUnavailable, err, nil)
-	default:
-		return application.ExternalRuntimeError(err)
 	}
+	return application.ExternalRuntimeError(err)
 }

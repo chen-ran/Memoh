@@ -101,8 +101,8 @@
     </SettingsSection>
 
     <!-- Codex and Grok Build sign their account in on the Agent's own
-         process: the runtime obtains the device code and writes its login,
-         which Memoh then keeps in the credential store. -->
+         process: the runtime obtains the device code, writes its login into
+         the workspace, and keeps it there. -->
     <SettingsSection
       v-if="deviceLoginAuth"
       :title="$t('bots.agent.account')"
@@ -110,7 +110,8 @@
       <DeviceLoginPanel
         :auth="deviceLoginAuth"
         :authorized="credentialConnected"
-        existing
+        :account="runtimeSignIn ? runtimeAccount.data.value?.email : undefined"
+        :note="accountNote"
         :authorizing="authorizing"
         :device-login="deviceLogin"
         @connect="startDeviceLogin"
@@ -150,6 +151,7 @@ import {
 } from '@felinic/ui'
 import {
   deleteBotsByBotIdAgentsByIdCredential,
+  getBotsByBotIdAgentsByIdAccount,
   getBotsByBotIdAgentsByIdRuntimeControls,
   patchBotsByBotIdAgentsById,
   postBotsByBotIdAgentsByIdLoginDeviceAuthorize,
@@ -230,7 +232,32 @@ async function setDefaultPermission(value: unknown) {
 }
 const credentialSecret = ref('')
 const savingCredential = ref(false)
-const credentialConnected = computed(() => !!props.agent.agent_credential_id)
+// A device-code sign-in (Codex's ChatGPT account, a Grok account) is kept by
+// the runtime in the workspace, so only the runtime can say whether it is
+// signed in.
+const runtimeSignIn = computed(() => isDeviceLoginAuthMode(config.auth))
+const runtimeAccount = useQuery({
+  key: () => ['agent-account', props.botId, props.agent.id ?? ''],
+  enabled: () => runtimeSignIn.value && !!props.agent.id,
+  // Reading it starts Codex, so only opening the page and signing in or out do.
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+  query: async ({ signal }) => {
+    const { data } = await getBotsByBotIdAgentsByIdAccount({
+      path: { bot_id: props.botId, id: props.agent.id! },
+      signal, throwOnError: true,
+    })
+    return data
+  },
+})
+const credentialConnected = computed(() => runtimeSignIn.value
+  ? !!runtimeAccount.data.value?.signed_in
+  : !!props.agent.agent_credential_id)
+const accountNote = computed(() => {
+  if (!runtimeSignIn.value || runtimeAccount.data.value) return undefined
+  if (runtimeAccount.error.value) return resolveApiErrorMessage(runtimeAccount.error.value, t('bots.agent.signInCheckFailed'))
+  return t('bots.agent.checkingSignIn')
+})
 
 const authOptions = computed(() => (isDirectBotAgentRuntime(runtime.value) ? DIRECT_BOT_AGENT_AUTH_MODES[runtime.value] : [])
   .map(value => ({ value, label: t(AGENT_AUTH_MODE_COPY[value].label) })))
@@ -256,7 +283,12 @@ const baseUrlPlaceholder = computed(() => isCodex.value
   : isClaudeCode.value ? 'https://api.anthropic.com' : '')
 
 async function refreshAgent() {
-  await queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+  // Usage is not refreshed here: its rows show only while Codex is signed in
+  // and read it when they appear.
+  await Promise.all([
+    queryCache.invalidateQueries({ key: ['bot-agents', props.botId] }),
+    queryCache.invalidateQueries({ key: ['agent-account', props.botId, props.agent.id ?? ''] }),
+  ])
   emit('authorized')
 }
 
