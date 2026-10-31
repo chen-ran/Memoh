@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
-	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
-	"github.com/felinics/memoh/internal/agent/runtime/codex/codexcfg"
-	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external/claudecode/claudecfg"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/codexcfg"
+	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -541,7 +541,7 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 			return ErrInvalidMetadata
 		}
 		setup := acpprofile.ParseInstanceSetup(botMetadata, agent.Metadata, descriptor.Provider)
-		if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 			return &ConfigurationError{Field: field.ID}
 		}
 		return nil

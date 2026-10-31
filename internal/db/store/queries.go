@@ -34,7 +34,6 @@ type Queries interface {
 	RetireSupersededInterruptedSessionRuns(context.Context) (int64, error)
 	RetireInterruptedSessionRun(context.Context, pgtype.UUID) (int64, error)
 
-	DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	CreateAgentAuthorization(context.Context, dbsqlc.CreateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	GetAgentAuthorization(context.Context, dbsqlc.GetAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	UpdateAgentAuthorization(context.Context, dbsqlc.UpdateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
@@ -71,6 +70,7 @@ type Queries interface {
 	AcquireProviderTemplateSyncLock(ctx context.Context) error
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	BumpBotRuntimeConfigEpoch(ctx context.Context, botID pgtype.UUID) (int64, error)
+	CancelToolApprovalRequest(ctx context.Context, arg dbsqlc.CancelToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	CancelPendingToolApprovalsBySession(ctx context.Context, arg dbsqlc.CancelPendingToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	CancelPendingUserInputsBySession(ctx context.Context, arg dbsqlc.CancelPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	CancelPendingUserInputsByRun(ctx context.Context, arg dbsqlc.CancelPendingUserInputsByRunParams) ([]dbsqlc.UserInputRequest, error)
@@ -158,7 +158,6 @@ type Queries interface {
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.CreateUserRow, error)
 	DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error
-	UpsertAgentSessionPublication(ctx context.Context, arg dbsqlc.UpsertAgentSessionPublicationParams) (int64, error)
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotChannelConfig(ctx context.Context, arg dbsqlc.DeleteBotChannelConfigParams) error
 	DeleteBotDependencyInstallation(ctx context.Context, arg dbsqlc.DeleteBotDependencyInstallationParams) (int64, error)
@@ -210,7 +209,6 @@ type Queries interface {
 	FindChatRoute(ctx context.Context, arg dbsqlc.FindChatRouteParams) (dbsqlc.FindChatRouteRow, error)
 	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.TeamAccount, error)
 	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.TeamAccount, error)
-	GetAgentSessionPublicationHead(ctx context.Context, arg dbsqlc.GetAgentSessionPublicationHeadParams) (pgtype.UUID, error)
 	GetRuntimeConfigEpoch(ctx context.Context, arg dbsqlc.GetRuntimeConfigEpochParams) (dbsqlc.GetRuntimeConfigEpochRow, error)
 	GetBotRuntimeReset(ctx context.Context, botID pgtype.UUID) (dbsqlc.GetBotRuntimeResetRow, error)
 	GetRuntimeRoundOutcome(ctx context.Context, arg dbsqlc.GetRuntimeRoundOutcomeParams) (string, error)
@@ -428,8 +426,10 @@ type Queries interface {
 	ListTokenUsageRecords(ctx context.Context, arg dbsqlc.ListTokenUsageRecordsParams) ([]dbsqlc.ListTokenUsageRecordsRow, error)
 	ListToolApprovalsBySession(ctx context.Context, arg dbsqlc.ListToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	ListToolApprovalsBySessionToolCalls(ctx context.Context, arg dbsqlc.ListToolApprovalsBySessionToolCallsParams) ([]dbsqlc.ToolApprovalRequest, error)
+	ListToolApprovalsByBotIDs(ctx context.Context, arg dbsqlc.ListToolApprovalsByBotIDsParams) ([]dbsqlc.ToolApprovalRequest, error)
 	ListUserInputsBySession(ctx context.Context, arg dbsqlc.ListUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	ListUserInputsBySessionToolCalls(ctx context.Context, arg dbsqlc.ListUserInputsBySessionToolCallsParams) ([]dbsqlc.UserInputRequest, error)
+	ListUserInputsByBotIDs(ctx context.Context, arg dbsqlc.ListUserInputsByBotIDsParams) ([]dbsqlc.UserInputRequest, error)
 	ListTranscriptionModels(ctx context.Context) ([]dbsqlc.ListTranscriptionModelsRow, error)
 	ListTranscriptionModelsByProviderID(ctx context.Context, providerID pgtype.UUID) ([]dbsqlc.Model, error)
 	ListTranscriptionProviders(ctx context.Context) ([]dbsqlc.Provider, error)
